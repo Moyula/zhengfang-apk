@@ -83,6 +83,7 @@ class ServicePluginActivity : ComponentActivity() {
         var captcha by remember { mutableStateOf<CaptchaChallenge?>(null) }
         var captchaCode by remember { mutableStateOf("") }
         var pendingAction by remember { mutableStateOf<JSONObject?>(null) }
+        var pendingAcademicAuthorization by remember { mutableStateOf<String?>(null) }
         var editing by remember { mutableStateOf(false) }
         var layoutRevision by remember { mutableIntStateOf(0) }
         val layout = remember { ServicePageLayout(this, openedScope.orEmpty() + ":" + pkg.manifest.id) }
@@ -141,7 +142,7 @@ class ServicePluginActivity : ComponentActivity() {
         }
         LaunchedEffect(runtime) { if (runtime.authenticated) load(initial) }
         GlassPageScaffold(title = page?.getString("title") ?: pkg.manifest.name,
-            subtitle = if (preview) "开发预览 · 独立服务会话" else "${pkg.manifest.school.getString("name")} · 校园服务", onBack = ::back) { padding ->
+            subtitle = if (preview) "开发预览 · 校园服务" else "${pkg.manifest.school.getString("name")} · 校园服务", onBack = ::back) { padding ->
             Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()).verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp,
                 top = 8.dp, bottom = padding.calculateBottomPadding() + 24.dp),
                 verticalArrangement = Arrangement.spacedBy(if (page?.optString("layout") == "compact") 12.dp else 22.dp)) {
@@ -150,7 +151,17 @@ class ServicePluginActivity : ComponentActivity() {
                     Text(message, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("service-message"))
                     TextButton(onClick = { PluginFeedback.open(this@ServicePluginActivity, pkg) }) { Text("快捷反馈") }
                 }
-                if (!loggedIn) {
+                if (!loggedIn && runtime.sharesAcademicSession) {
+                    InsetGroupedSection(header = "使用本校教务登录", footer = "授权仅用于本校声明范围内的请求，可随时撤销；提交操作仍需确认。") {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Text("使用已登录的教务账号，无需再次输入密码。教务登录过期时，请先重新登录本校账号。")
+                            LiquidButton({
+                                try { pendingAcademicAuthorization = runtime.academicAuthorizationDescription() }
+                                catch (e: Exception) { message = e.message ?: "无法取得本校登录会话" }
+                            }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("service-academic-authorize"), style = LiquidButtonStyle.Tinted) { Text("授权使用本校登录") }
+                        }
+                    }
+                } else if (!loggedIn) {
                     val auth = config.getJSONObject("authentication")
                     InsetGroupedSection(header = "登录此服务", footer = "服务账号独立于教务账号。密码仅用于本次登录，退出服务后清除会话。") {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -189,7 +200,8 @@ class ServicePluginActivity : ComponentActivity() {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         LiquidButton({ val current = history.last(); load(current.first, current.second) }, enabled = !busy && !native.busy, modifier = Modifier.weight(1f), horizontalPadding = 8.dp) { Text("刷新") }
                         LiquidButton({ editing = !editing }, enabled = !busy && !native.busy && page != null, modifier = Modifier.weight(1f), horizontalPadding = 8.dp) { Text(if (editing) "完成排布" else "调整排布") }
-                        if (runtime.needsLogin) LiquidButton({ runtime.logout(); loggedIn = false; page = null; captcha = null }, enabled = !busy && !native.busy, horizontalPadding = 12.dp) { Text("退出") }
+                        if (runtime.needsLogin || runtime.sharesAcademicSession) LiquidButton({ runtime.logout(); loggedIn = false; page = null; captcha = null }, enabled = !busy && !native.busy,
+                            modifier = Modifier.testTag("service-logout"), horizontalPadding = 12.dp) { Text(if (runtime.sharesAcademicSession) "撤销授权" else "退出") }
                     }
                     val current = page
                     if (current != null) {
@@ -217,6 +229,15 @@ class ServicePluginActivity : ComponentActivity() {
                     } else if (!busy) Text("页面暂未加载，点击刷新重试。")
                 }
             }
+        }
+        pendingAcademicAuthorization?.let { description ->
+            SystemDialog(onDismissRequest = { pendingAcademicAuthorization = null }, title = { Text("授权使用教务登录") },
+                content = { Text(description) },
+                confirmButton = { TextButton({ pendingAcademicAuthorization = null; run {
+                    runtime.authorizeAcademicSession()
+                    page = withContext(Dispatchers.IO) { runtime.page(history.last().first, history.last().second) }
+                } }) { Text("允许") } },
+                dismissButton = { TextButton({ pendingAcademicAuthorization = null }) { Text("取消") } })
         }
         pendingAction?.let { action ->
             val declaration = ServicePluginContract.action(pkg.manifest, action.getString("actionId"))

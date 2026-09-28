@@ -37,19 +37,36 @@ class PluginAcademicAdapter(
     }
 
     val effectiveCapabilities: Set<String> get() = pinned.manifest.capabilities + (base as? PluginAcademicAdapter)?.effectiveCapabilities.orEmpty()
-    suspend fun invoke(method: String, args: JSONObject = JSONObject(), confirmed: Boolean = false): JSONObject {
+    suspend fun invoke(method: String, args: JSONObject = JSONObject(), confirmed: Boolean = false): JSONObject =
+        invokeOperation(method, args, confirmed)
+
+    internal suspend fun invokeSharedService(method: String, args: JSONObject, confirmed: Boolean,
+        shared: PluginAcademicSession, grant: String): JSONObject = invokeOperation(method, args, confirmed, shared, grant)
+
+    private suspend fun invokeOperation(method: String, args: JSONObject, confirmed: Boolean,
+        shared: PluginAcademicSession? = null, grant: String = ""): JSONObject {
+        val needsShared = pinned.manifest.sharesAcademicSession && method.startsWith("service.")
+        if (needsShared != (shared != null)) throw AcademicException(AcademicStatus.UNSUPPORTED, "共享校园服务必须通过宿主授权入口调用")
         if (method !in pinned.manifest.capabilities)
             return (base as? PluginAcademicAdapter)?.invoke(method, args, confirmed) ?: unsupported(method)
         return session.withProtocolLock {
         ServicePluginContract.requireRequest(pinned.manifest, method, args, confirmed)
         val op = PluginOperation(session, pinned.manifest, method, development = !pinned.official && !pinned.bundled, confirmed = confirmed,
-            actionId = if (method == "service.action") args.getString("actionId") else null, scopeStillActive = scopeStillActive)
+            actionId = if (method == "service.action") args.getString("actionId") else null,
+            scopeStillActive = { shared?.requireGrant(grant); scopeStillActive() })
         val tokenCapture = if (method.startsWith("auth.") && pinned.manifest.isAcademic && pinned.manifest.json.has("academicSessionToken"))
             PluginAcademicTokenCapture(op, pinned) else null
-        val host = PluginHost(op, storageRoot, captureToken = tokenCapture?.let { it::capture })
+        val host = PluginHost(op, storageRoot, shared?.cookies(grant) ?: session.cookies,
+            captureToken = tokenCapture?.let { it::capture },
+            sharedToken = shared?.let { access -> { url -> access.tokenHeader(grant, url) } },
+            sharedRequest = shared?.let { access -> { url, verb, purpose, form -> access.requireRequest(grant, url, verb, purpose, form) } },
+            tokenSession = shared?.session ?: session)
+        val sharedCredential = shared?.session?.pluginToken
         val lease = PluginVersionLeases.acquire(pinned.manifest.id)
         try {
+            shared?.track(grant, op)
             val result = PluginSandboxClient(app).execute(pinned.source, args, op, host)
+            op.requireActive()
             schema.response(method, result).also { data ->
                 tokenCapture?.publish(data)
                 if (method == "service.page") {
@@ -62,12 +79,14 @@ class PluginAcademicAdapter(
                 }
             }
         } catch (e: PluginException) {
+            if (shared != null && e.code == PluginErrorCode.SESSION_EXPIRED)
+                runCatching { shared.expireCredentials(grant, sharedCredential) }
             if (e.code in setOf(PluginErrorCode.SESSION_EXPIRED, PluginErrorCode.INVALID_CREDENTIALS)) synchronized(session) {
                 if (session.pluginToken?.owner == PluginAcademicToken.owner(pinned)) session.pluginToken = null
             }
             val failure = op.failure(e.code, e.message.orEmpty()); throw AcademicException(status(failure.code), failure.message.orEmpty(), e)
         }
-        finally { lastTrace = host.report(); op.close(); lease.close() }
+        finally { lastTrace = host.report(); op.close(); shared?.untrack(op); lease.close() }
         }
     }
     private suspend fun pages(method: String, args: JSONObject = JSONObject(), onFirstPage: (JSONObject) -> Unit = {}): List<JSONObject> {

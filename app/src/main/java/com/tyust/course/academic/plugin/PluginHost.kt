@@ -26,6 +26,7 @@ import javax.crypto.spec.SecretKeySpec
 class PluginHost(private val operation: PluginOperation, private val storageRoot: File, cookies: CookieJar = operation.session.cookies,
     private val captureToken: ((HttpUrl, String, String, Int, String) -> Unit)? = null,
     private val sharedToken: ((HttpUrl) -> Pair<String, String>?)? = null,
+    private val tokenSession: com.tyust.course.academic.AcademicSession = operation.session,
     private val sharedRequest: ((HttpUrl, String, String, JSONObject?) -> Unit)? = null) {
     private val policy = PluginNetworkPolicy(operation.manifest.network)
     private val client = OkHttpClient.Builder().cookieJar(cookies)
@@ -181,9 +182,9 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
                 call.execute().use { response ->
                     operation.requireActive()
                     if (sessionToken != null && response.code in setOf(401, 403)) {
-                        synchronized(operation.session) {
+                        synchronized(tokenSession) {
                             operation.requireActive()
-                            if (operation.session.pluginToken?.header(url) == sessionToken) operation.session.pluginToken = null
+                            if (tokenSession.pluginToken?.header(url) == sessionToken) tokenSession.pluginToken = null
                         }
                         throw operation.failure(PluginErrorCode.SESSION_EXPIRED, "教务令牌已过期，请重新登录本校账号")
                     }

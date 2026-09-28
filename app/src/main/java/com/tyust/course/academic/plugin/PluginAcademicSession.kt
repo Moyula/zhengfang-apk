@@ -39,7 +39,8 @@ internal class PluginAcademicSession(
     ).joinToString("\u0000").toByteArray())
 
     fun requireCurrent() {
-        if ("academic.session" !in caller.manifest.permissions || "network" !in caller.manifest.permissions)
+        if (caller.manifest.sharesAcademicSession) ServicePluginContract.validateManifest(caller.manifest)
+        else if ("academic.session" !in caller.manifest.permissions || "network" !in caller.manifest.permissions)
             denied("插件需要声明教务登录共享和网络权限")
         if (!active() || !callerCurrent() || school == null || !user.isLoggedIn || user.sessionState.state.value.expired ||
             account.isBlank() || account != user.currentAccountStorageKey || !user.sessionState.isCurrent(token) ||
@@ -53,6 +54,22 @@ internal class PluginAcademicSession(
     }
 
     fun authorized(): Boolean { requireCurrent(); return !prefs.getString(key, null).isNullOrBlank() }
+
+    /** Restoring a grant must never recreate one after a concurrent revocation. */
+    fun existingGrant(): String? { requireCurrent(); return prefs.getString(key, null)?.takeIf(String::isNotBlank) }
+
+    fun requireCredentials() {
+        requireCurrent()
+        if (tokenProvider?.manifest?.json?.has("academicSessionToken") == true) synchronized(session) {
+            if (session.pluginToken?.let { it.epoch == epoch && it.owner == PluginAcademicToken.owner(tokenProvider) } != true)
+                throw PluginException(PluginErrorCode.SESSION_EXPIRED, "教务令牌已失效，请重新登录本校账号")
+        }
+    }
+
+    fun expireCredentials(grant: String, expected: PluginAcademicToken?) {
+        requireGrant(grant)
+        synchronized(session) { if (session.pluginToken === expected) session.pluginToken = null }
+    }
 
     fun description(): String {
         requireCurrent()

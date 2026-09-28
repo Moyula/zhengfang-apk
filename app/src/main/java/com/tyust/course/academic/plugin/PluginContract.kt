@@ -171,6 +171,7 @@ data class PluginManifest(val json: JSONObject) {
     val contributes: JSONObject get() = json.optJSONObject("contributes") ?: JSONObject()
     val permissions: Set<String> get() = PluginJson.strings(json.optJSONArray("permissions")).toSet()
     val service: JSONObject? get() = json.optJSONObject("service")
+    val sharesAcademicSession: Boolean get() = isService && service?.optBoolean("academicSession") == true
     val baseProvider: String? get() = json.optString("extends").takeIf(String::isNotBlank)
     val capabilities: Set<String> get() = PluginJson.strings(json.getJSONArray("capabilities")).toSet()
     val network: List<JSONObject> get() = PluginJson.objects(json.getJSONArray("network"))

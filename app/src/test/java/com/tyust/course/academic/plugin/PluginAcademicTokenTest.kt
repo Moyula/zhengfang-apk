@@ -126,6 +126,165 @@ class PluginAcademicTokenTest {
             } finally { native.close(); local.retire() }
         }
     }
+
+    private fun serviceManifest(id: String, shared: Boolean = true): JSONObject = JSONObject()
+        .put("id", id).put("name", "Synthetic campus service").put("version", "1.0.0").put("apiVersion", 3).put("kind", "service")
+        .put("school", schoolManifest()).put("network", network()).put("capabilities", JSONArray(listOf("service.page", "service.action")))
+        .put("requires", JSONArray().put(JSONObject().put("name", "academic.session.request").put("version", 3)))
+        .put("service", JSONObject("""{"schoolIds":["token-school"],"authentication":{"mode":"none"},"pages":[{"id":"main","title":"Main"}],"entries":[{"id":"main","title":"Main","pageId":"main","icon":"school","order":0}],"actions":[{"id":"save","title":"Save","kind":"mutation","confirmation":"Submit synthetic data"}]}""").put("academicSession", shared))
+
+    private fun serviceContext(http: () -> JSONObject = { request() }, beforeRequest: () -> Unit = {}): RespondingSandboxContext =
+        RespondingSandboxContext(app) { call, bridge ->
+            beforeRequest()
+            val payload = http()
+            if (call.getString("operation") == "service.action") payload.put("purpose", "mutation").put("method", "POST")
+            val response = RespondingSandboxContext.read(bridge.call(call.getJSONObject("context").getString("operationId"), "http",
+                RespondingSandboxContext.descriptor(app, payload)))
+            if (!response.getBoolean("ok")) response
+            else PluginJson.success(if (call.getString("operation") == "service.page")
+                JSONObject().put("pageId", "main").put("title", "Fixture").put("blocks", JSONArray())
+            else JSONObject().put("actionId", "save").put("confirmed", true))
+        }
+
+    @Test fun servicePagesAndActionsShareAfterConsentAndReopenWithoutAnotherLogin() = runBlocking {
+        capture()
+        session.cookies.saveFromResponse(url("/jw/api/me"), listOf(okhttp3.Cookie.Builder().name("session").value("school-cookie").hostOnlyDomain("127.0.0.1").path("/jw").build()))
+        for (id in listOf("test.service-a", "test.service-b")) {
+            val pkg = install(serviceManifest(id))
+            val runtime = ServicePluginSession(serviceContext(), pkg, "fixture-account")
+            assertFalse(runtime.authenticated)
+            assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
+            assertFalse(runtime.academicAuthorizationDescription().contains(secret))
+            assertFalse(runtime.authenticated)
+            runtime.authorizeAcademicSession()
+            assertTrue(runtime.authenticated); assertNotSame(session, runtime.session)
+            assertEquals(session.baseUrl, runtime.session.baseUrl)
+            server.enqueue(MockResponse().setBody("{}"))
+            assertFalse(runtime.page("main").toString().contains(secret))
+            server.takeRequest(2, TimeUnit.SECONDS)!!.also { assertEquals(secret, it.getHeader("X-Token")); assertEquals("session=school-cookie", it.getHeader("Cookie")) }
+            assertThrows(PluginException::class.java) { runBlocking { runtime.action("save", JSONObject(), false) } }
+            server.enqueue(MockResponse().setBody("{}"))
+            assertTrue(runtime.action("save", JSONObject(), true).getBoolean("confirmed"))
+            assertEquals("POST", server.takeRequest(2, TimeUnit.SECONDS)!!.method)
+            val privateSession = runtime.session
+            runtime.close()
+            assertTrue(privateSession.retired); assertFalse(session.retired); assertNotNull(session.pluginToken)
+            val reopened = ServicePluginSession(serviceContext(), pkg, "fixture-account")
+            assertTrue(reopened.authenticated); assertNotSame(privateSession, reopened.session)
+            server.enqueue(MockResponse().setBody("{}")); reopened.page("main")
+            assertEquals(secret, server.takeRequest(2, TimeUnit.SECONDS)!!.getHeader("X-Token"))
+            reopened.logout(); assertFalse(reopened.authenticated); assertNotNull(session.pluginToken)
+            reopened.close()
+            val revoked = ServicePluginSession(serviceContext(), pkg, "fixture-account")
+            assertFalse(revoked.authenticated); revoked.close()
+        }
+    }
+
+    @Test fun serviceRevocationDuringSandboxExecutionBlocksTheRequest() = runBlocking {
+        capture(); val pkg = install(serviceManifest("test.service-revoke"))
+        val runtime = ServicePluginSession(serviceContext(beforeRequest = { PluginAcademicSession.revoke(app, pkg.manifest.id) }), pkg, "account")
+        runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession()
+        assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
+        assertEquals(1, server.requestCount); assertFalse(runtime.authenticated); assertNotNull(session.pluginToken)
+        runtime.close()
+    }
+
+    @Test fun serviceExpiryClearsTheSchoolTokenInsteadOfOnlyItsPrivateSession() = runBlocking {
+        capture(); val pkg = install(serviceManifest("test.service-expiry"))
+        val runtime = ServicePluginSession(serviceContext(), pkg, "account")
+        runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession()
+        server.enqueue(MockResponse().setResponseCode(401))
+        assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
+        assertNull(session.pluginToken); assertFalse(session.retired); assertFalse(runtime.authenticated)
+        val reopened = ServicePluginSession(serviceContext(), pkg, "account")
+        assertFalse(reopened.authenticated); reopened.close()
+        runtime.close()
+    }
+
+    @Test fun sharedServiceChecksRedirectsAndRejectsExplicitTokenOverrides() = runBlocking {
+        capture(); val pkg = install(serviceManifest("test.service-scope"))
+        var next = request("/jw/api-evil/me")
+        val runtime = ServicePluginSession(serviceContext({ next }), pkg, "account")
+        runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession()
+        assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
+        next = request().put("headers", JSONObject().put("x-token", "override"))
+        assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
+        assertEquals(1, server.requestCount)
+        next = request(); server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/outside"))
+        assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
+        assertEquals(2, server.requestCount); runtime.close()
+    }
+
+    @Test fun serviceConsentCannotSurviveSchoolSessionChangeOrProviderReplacement() {
+        capture(); val pkg = install(serviceManifest("test.service-stale"))
+        val runtime = ServicePluginSession(serviceContext(), pkg, "account")
+        runtime.academicAuthorizationDescription()
+        session.invalidate()
+        assertThrows(PluginException::class.java) { runtime.authorizeAcademicSession() }
+        assertFalse(runtime.authenticated); runtime.close()
+        capture()
+        val replaced = ServicePluginSession(serviceContext(), pkg, "account")
+        replaced.academicAuthorizationDescription()
+        AcademicProviderRegistry.choose(school, "builtin.zf")
+        assertThrows(PluginException::class.java) { replaced.authorizeAcademicSession() }
+        assertFalse(replaced.authenticated); replaced.close()
+    }
+
+    @Test fun serviceReportedExpiryClearsTokenAndAccountSwitchPreventsAnyRequest() = runBlocking {
+        capture(); val pkg = install(serviceManifest("test.service-account"))
+        val context = RespondingSandboxContext(app) { _, _ -> PluginJson.error(PluginErrorCode.SESSION_EXPIRED, "Synthetic login expired") }
+        val expired = ServicePluginSession(context, pkg, "account")
+        expired.academicAuthorizationDescription(); expired.authorizeAcademicSession()
+        assertThrows(AcademicException::class.java) { runBlocking { expired.page("main") } }
+        assertNull(session.pluginToken); expired.close()
+        capture()
+        val switched = ServicePluginSession(serviceContext(), pkg, "account")
+        assertTrue(switched.authenticated)
+        UserManager.getInstance().studentId = "another-synthetic-account"
+        assertThrows(AcademicException::class.java) { runBlocking { switched.page("main") } }
+        assertEquals(2, server.requestCount); switched.close()
+    }
+
+    @Test fun legacyServicesStayIsolatedAndCookieSchoolsDoNotRequireResponseTokens() = runBlocking {
+        val cookieSource = JSONObject(source.manifest.json.toString()).put("id", "test.cookie-source").apply { remove("academicSessionToken") }
+        source = install(cookieSource); AcademicProviderRegistry.choose(school, source.manifest.id)
+        session.cookies.saveFromResponse(url("/jw/api/me"), listOf(okhttp3.Cookie.Builder().name("session").value("school-cookie").hostOnlyDomain("127.0.0.1").path("/jw").build()))
+        for (shared in listOf(false, true)) {
+            val pkg = install(serviceManifest("test.cookie-$shared", shared))
+            val runtime = ServicePluginSession(serviceContext(), pkg, "account")
+            if (shared) { runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession() }
+            server.enqueue(MockResponse().setBody("{}")); runtime.page("main")
+            val sent = server.takeRequest(2, TimeUnit.SECONDS)!!
+            assertNull(sent.getHeader("X-Token")); assertEquals(if (shared) "session=school-cookie" else null, sent.getHeader("Cookie"))
+            runtime.close(); assertFalse(session.retired)
+        }
+    }
+
+    @Test fun serviceOptInRejectsOldHostsPasswordModeAndAcademicTokenProduction() {
+        for (change in listOf<(JSONObject) -> Unit>(
+            { it.put("apiVersion", 2) },
+            { it.getJSONObject("service").getJSONObject("authentication").put("mode", "password") },
+            { it.getJSONArray("requires").getJSONObject(0).put("version", 2) },
+            { it.put("academicSessionToken", rule()) }
+        )) assertThrows(PluginException::class.java) { install(serviceManifest("test.invalid-service").also(change)) }
+        val pkg = install(serviceManifest("test.old-host-service"))
+        assertThrows(PluginException::class.java) { PluginPlatformContract.requireCompatible(pkg.manifest, 91, mapOf("academic.session.request" to 2)) }
+    }
+
+    @Test fun sharedServicePreviewPartitionsPrivateStorageByActualAcademicAccount() {
+        capture(); val pkg = install(serviceManifest("test.service-preview"))
+        val first = ServicePluginSession(serviceContext(), pkg, "preview:constant")
+        first.academicAuthorizationDescription(); first.authorizeAcademicSession()
+        val firstKey = first.session.key
+        first.close(); session.retire()
+        val user = UserManager.getInstance(); user.studentId = "second-synthetic-student"; user.saveCookieLogin("fixture=second")
+        session = AcademicGatewayFactory.sharedSession(school, user.currentAccountStorageKey)!!; session.cookies.clear(); capture()
+        val second = ServicePluginSession(serviceContext(), pkg, "preview:constant")
+        assertFalse(second.authenticated)
+        second.academicAuthorizationDescription(); second.authorizeAcademicSession()
+        assertNotEquals(firstKey, second.session.key)
+        second.close()
+    }
     @Test fun captchaFailureMalformedTokenAndStaleCaptureNeverPublish() {
         capture(result = "captcha"); assertNull(session.pluginToken)
         capture(status = 401); assertNull(session.pluginToken)

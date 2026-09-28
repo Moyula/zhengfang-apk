@@ -443,7 +443,7 @@ class PluginCenterActivity : ComponentActivity() {
                         }
                         TextButton(onClick = { web(PluginSourceDetails.page(pkg)) }) { Text("本版本源码与参与修改") }
                     }
-                    if ("academic.session" in pkg.manifest.permissions) {
+                    if ("academic.session" in pkg.manifest.permissions || pkg.manifest.sharesAcademicSession) {
                         val shared = runCatching { PluginAcademicSession(this@PluginCenterActivity, pkg, { true }).authorized() }.getOrDefault(false)
                         Detail("教务登录共享", if (shared) "已授权使用当前教务登录" else "尚未授权；首次使用时确认")
                         if (shared) TextButton(onClick = {
