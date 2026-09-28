@@ -100,9 +100,11 @@ class PluginPackageStore(private val context: Context, private val trustedKeys: 
         if (candidate.source.isNotEmpty()) {
             val session = AcademicSessionStore().session(candidate.manifest.json.optJSONObject("school")?.optString("id") ?: candidate.manifest.id, "package-inspection", "https://invalid.example")
             val op = PluginOperation(session, candidate.manifest, "__inspect", development = true)
-            val actual = PluginSandboxClient(context).execute(candidate.source, JSONObject(), op, PluginHost(op, File(context.cacheDir, "plugin-inspection")))
-            if (PluginJson.strings(actual.getJSONArray("data")).toSet() != candidate.manifest.capabilities)
-                throw PluginException(PluginErrorCode.VALIDATION_FAILED, "实际能力与清单不一致")
+            try {
+                val actual = PluginSandboxClient(context).execute(candidate.source, JSONObject(), op, PluginHost(op, File(context.cacheDir, "plugin-inspection")))
+                if (PluginJson.strings(actual.getJSONArray("data")).toSet() != candidate.manifest.capabilities)
+                    throw PluginException(PluginErrorCode.VALIDATION_FAILED, "实际能力与清单不一致")
+            } finally { op.close(); session.retire() }
         }
         currentCoroutineContext().ensureActive()
         synchronized(lock) {

@@ -128,7 +128,8 @@ class PluginSandboxClient(context: Context, private val startupTimeoutMillis: Lo
             accepting.set(false)
             incomingDescriptors.forEach { runCatching { it.close() } }
             incomingDescriptors.clear()
-            operation.close()
+            // The caller owns the operation through response validation/publication.
+            // This client only retires its Binder connection and transport resources.
             runCatching { sandbox?.cancel(operation.id) }
             if (bound) runCatching { application.unbindService(connection) }
             connected.cancel()
