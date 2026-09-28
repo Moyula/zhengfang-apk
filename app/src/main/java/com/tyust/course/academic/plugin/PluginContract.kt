@@ -18,12 +18,19 @@ object PluginLimits {
     const val MEMORY_BYTES = 64L * 1024 * 1024
     const val STACK_BYTES = 1024L * 1024
     const val JS_MILLIS = 5_000L
+    // Authentication now includes the former native page parsing and crypto flow.
+    // Keep its CPU allowance separate from queries; async host/network time is excluded.
+    const val AUTH_JS_MILLIS = 15_000L
     const val WALL_MILLIS = 120_000L
     const val RESPONSE_BYTES = 5 * 1024 * 1024
     const val WIRE_BYTES = 8 * 1024 * 1024
     const val PACKAGE_BYTES = 2 * 1024 * 1024
     const val EXPANDED_BYTES = 8 * 1024 * 1024
+    // UI state and persistent preferences are small; temporary protocol data can
+    // include a multi-page course catalogue plus the original submission fields.
     const val STATE_BYTES = 256 * 1024
+    const val STORAGE_BYTES = 256 * 1024
+    const val SESSION_STATE_BYTES = 8 * 1024 * 1024
 }
 
 object PluginJson {

@@ -166,7 +166,8 @@ fun GradesScreen(
     semesterError: String = "",
     overallError: String = "",
     examError: String = "",
-    supportedTabs: Set<Int> = setOf(0, 1, 2)
+    supportedTabs: Set<Int> = setOf(0, 1, 2),
+    semesterLabels: Map<String, String> = emptyMap()
 ) {
     val availableTabs = listOf(0, 1, 2).filter { it in supportedTabs }.ifEmpty { listOf(0, 1, 2) }
     val tabTitles = availableTabs.map { listOf("学期", "总体", "考试")[it] + if (it in supportedTabs) "" else " · 未适配" }
@@ -272,6 +273,7 @@ fun GradesScreen(
                     0 -> SemesterGradesContent(
                         grades = semesterGrades,
                         semesters = semesters,
+                        semesterLabels = semesterLabels,
                         currentSemester = currentSemester,
                         onSemesterChange = onSemesterChange,
                         isLoading = semesterIsLoading,
@@ -404,6 +406,7 @@ private fun OverallGradesContent(
 private fun SemesterGradesContent(
     grades: List<GradeItemUi>,
     semesters: List<String>,
+    semesterLabels: Map<String, String>,
     currentSemester: String,
     onSemesterChange: (String) -> Unit,
     isLoading: Boolean,
@@ -430,7 +433,7 @@ private fun SemesterGradesContent(
         item {
             Column(Modifier.moduleEntrance(1), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 SemesterSelector(
-                    semesters = semesters,
+                    semesters = semesters, semesterLabels = semesterLabels,
                     currentSemester = currentSemester,
                     onSemesterChange = onSemesterChange
                 )
@@ -489,12 +492,13 @@ private fun GradeRefreshStatus(isLoading: Boolean, error: String) {
 @Composable
 private fun SemesterSelector(
     semesters: List<String>,
+    semesterLabels: Map<String, String>,
     currentSemester: String,
     onSemesterChange: (String) -> Unit
 ) {
     val selectedIndex = semesters.indexOf(currentSemester).takeIf { it >= 0 }
     SystemPicker(
-        options = semesters,
+        options = semesters.map { semesterLabels[it] ?: it },
         selectedIndex = selectedIndex,
         onSelect = { index -> onSemesterChange(semesters[index]) },
         modifier = Modifier.fillMaxWidth(),

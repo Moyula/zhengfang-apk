@@ -172,6 +172,9 @@ class GlassLensAnchor internal constructor(
         androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { overlayVersion++ }
     }
 
+    /** Live replay also needs invalidation after a frozen glyph picture is replaced. */
+    internal fun liveSourceRevision(): Long = (version.toLong() shl 32) or (overlayVersion.toLong() and 0xffffffffL)
+
     private var warnedUnanchored = false
 
     /** 连续多少次 draw 仍然没有 coordinates。挂上即清零。 */
@@ -703,6 +706,14 @@ private class GlassLensNode(
      */
     private var target = GlassLensTarget(anchor.source, anchor.tag)
     private var targetReleased = false
+    // Movable content detaches while crossing into/out of a same-window portal.
+    // Releasing immediately discards the completed optical frame for one draw.
+    private val releaseDetachedTarget = Runnable {
+        if (!isAttached) {
+            target.release()
+            targetReleased = true
+        }
+    }
 
     var anchor: GlassLensAnchor = anchor
         set(value) {
@@ -717,6 +728,7 @@ private class GlassLensNode(
         }
 
     override fun onAttach() {
+        mainHandler.removeCallbacks(releaseDetachedTarget)
         if (targetReleased) {
             target = GlassLensTarget(anchor.source, anchor.tag)
             targetReleased = false
@@ -734,9 +746,10 @@ private class GlassLensNode(
 
     override fun onDetach() {
         target.onFrameReady = null
-        target.release()
-        targetReleased = true
         mainHandler.removeCallbacksAndMessages(null)
+        // Reparenting finishes in this UI traversal. Actual disposal still
+        // releases the GPU target at the next main-loop turn.
+        mainHandler.post(releaseDetachedTarget)
     }
 
     private var coordinates: LayoutCoordinates? = null
@@ -796,6 +809,7 @@ private class GlassLensNode(
         // At zero refraction the GPU can replay the live source directly. Sending
         // animated glyphs through readback here freezes them when the slider stops.
         val useLiveSource = optics.lensAmountPx <= 0f
+        if (useLiveSource) anchor.liveSourceRevision()
         if (!useLiveSource) anchor.ensureSource() ?: return
         // Keep animating against the uploaded source while a newer capture is pending.
         // Publishing its coordinates before its pixels arrive stalls the optical motion.
