@@ -257,7 +257,10 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
                 "get" -> return values.opt(key) ?: JSONObject.NULL
                 "set" -> {
                     val candidate = JSONObject(values.toString()).put(key, payload.get("value"))
-                    if (candidate.toString().toByteArray().size > PluginLimits.STATE_BYTES) throw PluginException(PluginErrorCode.RESOURCE_LIMIT, "适配存储超过 256 KiB")
+                    val limit = if (persistent) PluginLimits.STORAGE_BYTES else PluginLimits.SESSION_STATE_BYTES
+                    if (candidate.toString().toByteArray(Charsets.UTF_8).size > limit) throw PluginException(
+                        PluginErrorCode.RESOURCE_LIMIT,
+                        if (persistent) "适配存储超过 256 KiB" else "教务会话缓存超过 8 MiB，请重新登录后重试")
                     values.put(key, payload.get("value"))
                 }
                 "remove" -> values.remove(key)

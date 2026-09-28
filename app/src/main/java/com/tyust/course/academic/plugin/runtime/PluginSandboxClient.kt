@@ -88,8 +88,17 @@ class PluginSandboxClient(context: Context, private val startupTimeoutMillis: Lo
                 operation.requireActive()
                 if (!response.optBoolean("ok")) {
                     val failure = response.optJSONObject("error")
-                    val code = runCatching { PluginErrorCode.valueOf(failure?.optString("code").orEmpty()) }.getOrDefault(PluginErrorCode.PAGE_CHANGED)
-                    throw operation.failure(code, failure?.optString("message") ?: "插件返回错误")
+                    var code = runCatching { PluginErrorCode.valueOf(failure?.optString("code").orEmpty()) }.getOrDefault(PluginErrorCode.PAGE_CHANGED)
+                    val detail = failure?.optString("message") ?: "插件返回错误"
+                    // __zfInvoke may catch QuickJS's interrupt and serialize it as a generic
+                    // page error before the Kotlin engine can surface its typed exception.
+                    if (code == PluginErrorCode.PAGE_CHANGED &&
+                        detail.trim() in setOf("interrupted", "InternalError: interrupted")) code = PluginErrorCode.TIMEOUT
+                    val message = if (code == PluginErrorCode.TIMEOUT) {
+                        if (operation.method.startsWith("auth.")) "登录处理超时，请重试或使用网页登录"
+                        else "教务处理超时，请重试"
+                    } else detail
+                    throw operation.failure(code, message)
                 }
                 diagnostic("completed")
                 response
