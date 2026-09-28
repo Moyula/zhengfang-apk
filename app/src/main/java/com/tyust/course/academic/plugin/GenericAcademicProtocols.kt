@@ -47,6 +47,7 @@ object GenericAcademicProtocols {
             .put("school", parent?.manifest?.school ?: JSONObject().put("id", school.id).put("name", school.name)
                 .put("domain", school.domain).put("protocol", school.protocol).put("basePath", school.basePath).put("academicSystem", school.academicSystem))
             .put("network", network(school)).put("files", JSONObject().put("index.js", PluginJson.sha256(source.toByteArray())))
+        parent?.let { PluginAcademicTokenRule.inherit(it.manifest, manifest) }
         return PluginPackage(PluginManifest(manifest), source, PluginJson.sha256((PluginJson.canonical(manifest) + source).toByteArray()), identity.official, identity.bundled)
     }
 }

@@ -98,12 +98,15 @@ class NativeCapabilityHost(
                 "academic.session.revoke" -> { PluginAcademicSession.revoke(app, pkg.manifest.id); JSONObject.NULL }
                 "academic.session.request" -> {
                     requireNetworkPermission()
+                    if (effect.getInt("version") >= 2 && PluginJson.objects(pkg.manifest.json.optJSONArray("requires") ?: JSONArray()).none {
+                        it.optString("name") == "academic.session.request" && it.optInt("version") >= 2
+                    }) throw PluginException(PluginErrorCode.UNSUPPORTED, "共享教务令牌需要声明 academic.session.request 版本 2")
                     val grant = input.getString("grant")
                     academicSession.requireGrant(grant)
                     val request = input.getJSONObject("request")
                     val mutation = request.getString("purpose") == "mutation"
                     if (mutation) confirm(flow, "确认提交", "${pkg.manifest.name} 将使用当前教务账号向 ${request.getString("url")} 提交数据。")
-                    callHost("http", request, mutation, flow = flow, shared = academicSession, grant = grant)
+                    callHost("http", request, mutation, flow = flow, shared = academicSession, grant = grant, shareToken = effect.getInt("version") >= 2)
                 }
                 "academic.study.snapshot", "academic.study.refresh" -> {
                     val grant = pkg.manifest.id + ":" + PluginJson.sha256((namespace + "academic.read" + com.tyust.course.manager.UserManager.getInstance().currentAccountStorageKey).toByteArray())
@@ -255,7 +258,7 @@ class NativeCapabilityHost(
         return PluginCredentialBindings.apply(request, values)
     }
     private suspend fun callHost(method: String, input: JSONObject, confirmed: Boolean = false, upload: File? = null, field: String = "file", flow: NativeFlow? = null,
-        shared: PluginAcademicSession? = null, grant: String = ""): Any? = suspendCancellableCoroutine { continuation ->
+        shared: PluginAcademicSession? = null, grant: String = "", shareToken: Boolean = false): Any? = suspendCancellableCoroutine { continuation ->
         val operation = PluginOperation(shared?.session ?: session, pkg.manifest, "host.effect", development = !pkg.official, confirmed = confirmed, packageDigest = pkg.digest,
             scopeStillActive = { shared?.requireGrant(grant); active() && PluginServiceAccounts(app).current(pkg, session) })
         shared?.track(grant, operation)
@@ -264,6 +267,7 @@ class NativeCapabilityHost(
             val lease = PluginVersionLeases.acquire(pkg.manifest.id)
             try {
                 val host = PluginHost(operation, File(app.filesDir, "academic-plugin-storage"), shared?.cookies(grant) ?: PluginWebSessionCookies.jar(app, pkg, session, active),
+                    sharedToken = if (shareToken) shared?.let { access -> { url -> access.tokenHeader(grant, url) } } else null,
                     sharedRequest = shared?.let { access -> { url, verb, purpose, form -> access.requireRequest(grant, url, verb, purpose, form) } })
                 val value = if (upload != null) host.upload(input, upload, field) else {
                     val response = host.call(method, input)

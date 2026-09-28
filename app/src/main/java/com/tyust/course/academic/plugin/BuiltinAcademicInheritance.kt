@@ -59,6 +59,7 @@ object BuiltinAcademicInheritance {
             .put("school", parent.manifest.school).put("network", parent.manifest.json.getJSONArray("network"))
             .put("files", JSONObject().put("index.js", PluginJson.sha256(source.toByteArray())))
         // Preserve the parent's authority and development namespace. This is not a signed package import.
+        PluginAcademicTokenRule.inherit(parent.manifest, manifest)
         return PluginPackage(PluginManifest(manifest), source, PluginJson.sha256((manifest.toString() + source).toByteArray()), parent.official, parent.bundled)
     }
 }

@@ -30,6 +30,7 @@ internal class PluginAcademicSession(
     private val base = session.baseUrl.toHttpUrlOrNull()
         ?: throw PluginException(PluginErrorCode.UNTRUSTED_URL, "学校地址无效")
     private val provider = school?.let(AcademicProviderRegistry::resolve)
+    private val tokenProvider = school?.let(AcademicProviderRegistry::authenticationPackage)
     private val sourceDigest = provider?.manifest?.id?.let { AcademicProviderRegistry.knownPackage(it)?.digest }
     private val prefs = app.getSharedPreferences("native-plugin-permissions", Context.MODE_PRIVATE)
     private val key = prefix(caller.manifest.id) + PluginJson.sha256(listOf(
@@ -46,6 +47,7 @@ internal class PluginAcademicSession(
             AcademicGatewayFactory.sharedSession(school, account) !== session ||
             !AcademicProviderRegistry.matches(caller, school) ||
             (AcademicProviderRegistry.resolve(school)?.digest != provider?.digest) ||
+            (AcademicProviderRegistry.authenticationPackage(school)?.digest != tokenProvider?.digest) ||
             provider != null && !AcademicProviderRegistry.isCurrentPackage(provider.manifest.id, sourceDigest.orEmpty()))
             throw PluginException(PluginErrorCode.STALE_CONTEXT, "教务账号、学校或插件已改变，请重新授权")
     }
@@ -94,6 +96,17 @@ internal class PluginAcademicSession(
     fun cookies(grant: String): CookieJar = object : CookieJar {
         override fun loadForRequest(url: HttpUrl): List<Cookie> { requireGrant(grant); return session.cookies.loadForRequest(url) }
         override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) { requireGrant(grant); session.cookies.saveFromResponse(url, cookies) }
+    }
+
+    fun tokenHeader(grant: String, url: HttpUrl): Pair<String, String>? {
+        requireGrant(grant)
+        if (tokenProvider?.manifest?.json?.has("academicSessionToken") != true) return null
+        return synchronized(session) {
+            if (session.retired || session.epoch != epoch) throw PluginException(PluginErrorCode.SESSION_EXPIRED, "教务会话已失效")
+            val token = session.pluginToken?.takeIf { it.epoch == epoch && it.owner == PluginAcademicToken.owner(tokenProvider) }
+                ?: throw PluginException(PluginErrorCode.SESSION_EXPIRED, "教务令牌已失效，请重新登录本校账号")
+            token.header(url)
+        }
     }
 
     fun track(grant: String, operation: PluginOperation) = synchronized(grantLock) {

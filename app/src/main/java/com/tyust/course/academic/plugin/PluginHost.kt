@@ -24,6 +24,8 @@ import javax.crypto.spec.SecretKeySpec
 
 /** Host-side authority. Values supplied by the JS context are never used for account selection. */
 class PluginHost(private val operation: PluginOperation, private val storageRoot: File, cookies: CookieJar = operation.session.cookies,
+    private val captureToken: ((HttpUrl, String, String, Int, String) -> Unit)? = null,
+    private val sharedToken: ((HttpUrl) -> Pair<String, String>?)? = null,
     private val sharedRequest: ((HttpUrl, String, String, JSONObject?) -> Unit)? = null) {
     private val policy = PluginNetworkPolicy(operation.manifest.network)
     private val client = OkHttpClient.Builder().cookieJar(cookies)
@@ -85,6 +87,14 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
         if (charsetName !in setOf("UTF-8", "GBK", "GB2312", "GB18030")) invalid("不支持的编码")
         val charset = Charset.forName(charsetName)
         val supplied = JSONObject((payload.optJSONObject("headers") ?: JSONObject()).toString())
+        // Only the host's authorized shared-session path supplies this callback.
+        sharedRequest?.invoke(url, method, purpose, form)
+        val sessionToken = sharedToken?.invoke(url)
+        if (sessionToken != null) {
+            if (payload.has("cookieHeader") || supplied.keys().asSequence().any { it.equals("X-Token", true) || it.equals("Authorization", true) })
+                invalid("共享教务令牌不能与其他认证请求头混用")
+            supplied.put(sessionToken.first, sessionToken.second)
+        }
         val academicToken = sharedRequest != null || operation.manifest.apiVersion == 3 &&
             (operation.manifest.kind in setOf("independent", "extension") || operation.manifest.isNative && operation.manifest.isAcademic && operation.method.substringBefore('.') in setOf("auth", "study", "selection"))
         val scopedToken = operation.manifest.apiVersion == 3 && (operation.manifest.isService || operation.manifest.isNative) &&
@@ -146,6 +156,8 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
             authScope?.requireAllowed(url, method)
             val rule = policy.requireAllowed(url, method, purpose, form, if (token != null && !academicToken) "X-Token" else null)
             sharedRequest?.invoke(url, method, purpose, form)
+            if (sessionToken != null && sharedToken?.invoke(url) != sessionToken)
+                throw PluginException(PluginErrorCode.SESSION_EXPIRED, "教务令牌已改变，请重新发起请求")
             val userAgent = rule.optString("userAgent").ifBlank {
                 operation.manifest.json.optJSONObject("school")?.optString("userAgent").orEmpty()
             }.ifBlank { "ZhengfangAcademicPlugin/1" }
@@ -168,6 +180,13 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
             try {
                 call.execute().use { response ->
                     operation.requireActive()
+                    if (sessionToken != null && response.code in setOf(401, 403)) {
+                        synchronized(operation.session) {
+                            operation.requireActive()
+                            if (operation.session.pluginToken?.header(url) == sessionToken) operation.session.pluginToken = null
+                        }
+                        throw operation.failure(PluginErrorCode.SESSION_EXPIRED, "教务令牌已过期，请重新登录本校账号")
+                    }
                     if (log.size < 200) log += JSONObject().put("event", "http").put("origin", "${url.scheme}://${url.host}:${url.port}")
                         .put("method", method).put("purpose", purpose).put("status", response.code)
                     if (response.code in 300..399) {
@@ -203,6 +222,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
                             else -> invalid("不支持的响应格式")
                         }
                         val headers = JSONObject()
+                        captureToken?.invoke(url, method, purpose, response.code, bytes.toString(charset))
                         listOf("Content-Type", "Date", "Retry-After").forEach { name -> response.header(name)?.let { headers.put(name, it) } }
                         val responseUrl = url.newBuilder().encodedFragment(callbackFragment).build()
                         return JSONObject().put("status", response.code).put("url", responseUrl.toString()).put("headers", headers).put("body", body)

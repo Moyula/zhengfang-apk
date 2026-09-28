@@ -655,7 +655,7 @@
   },
   {
     "name": "academic.session.request",
-    "version": 1,
+    "version": 2,
     "permission": "academic.session",
     "input": {
       "type": "object",

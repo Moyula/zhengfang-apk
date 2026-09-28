@@ -148,6 +148,61 @@
       "maxItems": 48,
       "uniqueItems": true
     },
+    "academicSessionToken": {
+      "type": "object",
+      "properties": {
+        "response": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "method": {
+              "enum": [
+                "GET",
+                "POST"
+              ]
+            },
+            "jsonPointer": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "path",
+            "method",
+            "jsonPointer"
+          ],
+          "additionalProperties": false
+        },
+        "request": {
+          "type": "object",
+          "properties": {
+            "pathPrefix": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "header": {
+              "const": "X-Token"
+            }
+          },
+          "required": [
+            "pathPrefix",
+            "header"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "response",
+        "request"
+      ],
+      "additionalProperties": false
+    },
     "minAppVersionCode": {
       "type": "integer",
       "minimum": 1,

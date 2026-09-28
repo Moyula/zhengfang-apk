@@ -44,11 +44,14 @@ class PluginAcademicAdapter(
         ServicePluginContract.requireRequest(pinned.manifest, method, args, confirmed)
         val op = PluginOperation(session, pinned.manifest, method, development = !pinned.official && !pinned.bundled, confirmed = confirmed,
             actionId = if (method == "service.action") args.getString("actionId") else null, scopeStillActive = scopeStillActive)
-        val host = PluginHost(op, storageRoot)
+        val tokenCapture = if (method.startsWith("auth.") && pinned.manifest.isAcademic && pinned.manifest.json.has("academicSessionToken"))
+            PluginAcademicTokenCapture(op, pinned) else null
+        val host = PluginHost(op, storageRoot, captureToken = tokenCapture?.let { it::capture })
         val lease = PluginVersionLeases.acquire(pinned.manifest.id)
         try {
             val result = PluginSandboxClient(app).execute(pinned.source, args, op, host)
             schema.response(method, result).also { data ->
+                tokenCapture?.publish(data)
                 if (method == "service.page") {
                     if (data.getString("pageId") != args.getString("pageId")) throw PluginException(PluginErrorCode.VALIDATION_FAILED, "服务返回了其他页面")
                     ServicePluginContract.validatePage(pinned.manifest, data)
@@ -58,7 +61,12 @@ class PluginAcademicAdapter(
                     data.optJSONObject("page")?.let { ServicePluginContract.validatePage(pinned.manifest, it) }
                 }
             }
-        } catch (e: PluginException) { val failure = op.failure(e.code, e.message.orEmpty()); throw AcademicException(status(failure.code), failure.message.orEmpty(), e) }
+        } catch (e: PluginException) {
+            if (e.code in setOf(PluginErrorCode.SESSION_EXPIRED, PluginErrorCode.INVALID_CREDENTIALS)) synchronized(session) {
+                if (session.pluginToken?.owner == PluginAcademicToken.owner(pinned)) session.pluginToken = null
+            }
+            val failure = op.failure(e.code, e.message.orEmpty()); throw AcademicException(status(failure.code), failure.message.orEmpty(), e)
+        }
         finally { lastTrace = host.report(); op.close(); lease.close() }
         }
     }

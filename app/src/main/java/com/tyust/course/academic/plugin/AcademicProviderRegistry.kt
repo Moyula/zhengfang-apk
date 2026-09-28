@@ -133,6 +133,12 @@ object AcademicProviderRegistry {
         val pkg = resolve(school) ?: return null
         return adapterFor(pkg, school, session)
     }
+    internal fun authenticationPackage(school: SchoolConfig): PluginPackage? {
+        val pkg = resolve(school) ?: return null
+        if ("auth.start" in pkg.manifest.capabilities) return pkg
+        val id = BuiltinAcademicInheritance.providers[pkg.manifest.baseProvider] ?: return null
+        return protocolPackage(id)?.let { BuiltinAcademicInheritance.inherit(pkg, it, school) }
+    }
     fun adapterFor(pkg: PluginPackage, school: SchoolConfig, session: AcademicSession): PluginAcademicAdapter {
         val baseSchool = pkg.manifest.baseProvider?.let { provider -> SchoolConfig.fromJson(school.toJson()).apply {
             academicProvider = ""; academicSystem = provider.removePrefix("builtin.").let { if (it == "legacy_zf") "zf" else it }
