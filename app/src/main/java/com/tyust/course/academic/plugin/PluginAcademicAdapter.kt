@@ -61,8 +61,10 @@ class PluginAcademicAdapter(
         val host = PluginHost(op, storageRoot, shared?.cookies(grant) ?: session.cookies,
             captureToken = tokenCapture?.let { it::capture },
             sharedApproval = shared?.let { access -> { request ->
-                if (!confirmed && reusableAction == null) access.requireReviewedReadOrConfirmation(request)
                 if (reusableAction != null && request.has("body")) throw PluginException(PluginErrorCode.PERMISSION_DENIED, "可复用操作仅接受审核过的结构化参数")
+                if (confirmed) false
+                else if (reusableAction != null) access.operation(request)?.optString("risk") == "read-state"
+                else access.requireReviewedReadOrConfirmation(request)
             } },
             sharedToken = shared?.let { access -> { url -> access.tokenHeader(grant, url) } },
             sharedRequest = shared?.let { access -> { url, verb, purpose, form -> access.requireRequest(grant, url, verb, purpose, form)

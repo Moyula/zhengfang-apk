@@ -13,6 +13,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.json.JSONArray
 import org.json.JSONObject
+import okio.ByteString.Companion.toByteString
 import org.junit.*
 import org.junit.Assert.*
 import org.junit.runner.RunWith
@@ -22,6 +23,10 @@ import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.InetAddress
+import java.security.KeyPair
+import java.security.KeyPairGenerator
+import java.security.Signature
+import java.security.spec.ECGenParameterSpec
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -52,13 +57,21 @@ class PluginAcademicTokenTest {
         .put("domain", value.domain).put("protocol", value.protocol).put("basePath", value.basePath).put("academicSystem", value.academicSystem)
     private fun network() = JSONArray().put(JSONObject().put("origin", url("/").toString().trimEnd('/')).put("pathPrefix", "/")
         .put("methods", JSONArray(listOf("GET", "POST"))).put("purposes", JSONArray(listOf("auth", "query", "mutation"))))
-    private fun install(manifest: JSONObject): PluginPackage {
+    private fun install(manifest: JSONObject, signer: KeyPair? = null): PluginPackage {
         // Host integration fixtures have no JS execution; protocol execution is tested in QuickJS.
         val js = ByteArray(0)
         manifest.put("entry", "index.js").put("files", JSONObject().put("index.js", PluginJson.sha256(js)))
         val bytes = ByteArrayOutputStream().also { output -> ZipOutputStream(output).use { zip ->
             for ((name, data) in listOf("manifest.json" to manifest.toString().toByteArray(), "index.js" to js)) {
                 zip.putNextEntry(ZipEntry(name)); zip.write(data); zip.closeEntry()
+            }
+            if (signer != null) {
+                val signature = Signature.getInstance("SHA256withECDSA").run {
+                    initSign(signer.private); update(PluginJson.canonical(manifest).toByteArray()); sign()
+                }
+                zip.putNextEntry(ZipEntry("signature.json"))
+                zip.write(JSONObject().put("keyId", "synthetic-consent").put("signature", signature.toByteString().base64()).toString().toByteArray())
+                zip.closeEntry()
             }
         } }.toByteArray()
         return runBlocking { AcademicProviderRegistry.packages().install(bytes, allowDevelopment = true) }.also { installed += it.manifest.id; AcademicProviderRegistry.reload() }
@@ -83,6 +96,7 @@ class PluginAcademicTokenTest {
         if (::session.isInitialized) session.retire()
         if (::school.isInitialized) AcademicProviderRegistry.choose(school, null)
         installed.distinct().forEach { AcademicProviderRegistry.packages().deactivate(it) }; AcademicProviderRegistry.reload()
+        app.getSharedPreferences("plugin-local-catalog", 0).edit().remove("key").commit()
         server.shutdown(); Dispatchers.resetMain()
     }
     private fun capture(body: String = """{"data":{"token":"$secret"}}""", status: Int = 200, result: String = "authenticated"): PluginAcademicTokenCapture {
@@ -145,6 +159,144 @@ class PluginAcademicTokenTest {
                 JSONObject().put("pageId", "main").put("title", "Fixture").put("blocks", JSONArray())
             else JSONObject().put("actionId", "save").put("confirmed", true))
         }
+
+    private fun reviewedProvider() {
+        val signer = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        AcademicProviderRegistry.configureLocalCatalog(url("/catalog.json").toString(), JSONObject().put("keyId", "synthetic-consent")
+            .put("spki", signer.public.encoded.toByteString().base64()).toString())
+        val empty = JSONObject("""{"type":"object","properties":{},"additionalProperties":false}""")
+        val targets = JSONObject("""{"type":"object","properties":{"id":{"type":"string","enum":["one","two"]}},"required":["id"],"additionalProperties":false}""")
+        fun operation(id: String, path: String, risk: String) = JSONObject().put("id", id).put("title", "Synthetic $id")
+            .put("origin", url("/").toString().trimEnd('/')).put("path", path)
+            .put("method", if (risk == "read") "GET" else "POST").put("purpose", if (risk == "read") "query" else "mutation")
+            .put("risk", risk).put("query", empty).put("form", if (risk == "read-state") targets else empty)
+        val manifest = JSONObject(source.manifest.json.toString()).put("id", "test.reviewed-source")
+            .put("sharedOperations", JSONArray().put(operation("seen", "/jw/api/seen", "read-state"))
+                .put(operation("read", "/jw/api/me", "read")).put(operation("submit", "/jw/api/submit", "high")))
+        manifest.getJSONArray("requires").put(JSONObject().put("name", "privacy.status").put("version", 1))
+        source = install(manifest, signer)
+        assertTrue(source.official); assertNotNull(source.publisher)
+        AcademicProviderRegistry.choose(school, source.manifest.id)
+        session = AcademicGatewayFactory.sharedSession(school, UserManager.getInstance().currentAccountStorageKey)!!
+        capture()
+    }
+    private fun seen(id: String = "one") = request("/jw/api/seen").put("method", "POST").put("purpose", "mutation")
+        .put("form", JSONObject().put("id", id))
+    private fun refreshContext(requests: () -> List<JSONObject> = { listOf(seen(), seen("two"), request()) }) = RespondingSandboxContext(app) { call, bridge ->
+        var result = JSONObject()
+        for (payload in requests()) {
+            val response = RespondingSandboxContext.read(bridge.call(call.getJSONObject("context").getString("operationId"), "http",
+                RespondingSandboxContext.descriptor(app, payload)))
+            if (!response.getBoolean("ok")) return@RespondingSandboxContext response
+            result = response.getJSONObject("data")
+        }
+        PluginJson.success(if (call.getString("operation") == "service.page") JSONObject().put("pageId", "main")
+            .put("title", JSONObject(result.getString("body")).optString("text", "Fixture")).put("blocks", JSONArray())
+        else JSONObject().put("actionId", call.getJSONObject("args").getString("actionId")).put("confirmed", true))
+    }
+    private suspend fun refresh(runtime: ServicePluginSession) {
+        repeat(2) { server.enqueue(MockResponse().setBody("{}")) }
+        server.enqueue(MockResponse().setBody("""{"text":"synthetic-message"}"""))
+        assertEquals("synthetic-message", runtime.page("main").getString("title"))
+        repeat(3) { assertEquals(secret, server.takeRequest(2, TimeUnit.SECONDS)!!.getHeader("X-Token")) }
+    }
+
+    @Test fun oneGroupedConsentCoversRepeatedReadStateRefreshCloseAndSameAccountRelogin() = runBlocking {
+        reviewedProvider(); val pkg = install(serviceManifest("test.refresh-remember"))
+        var prompts = 0
+        fun runtime() = ServicePluginSession(refreshContext(), pkg, "account", requestConfirmation = { _, _, _ -> prompts++; false },
+            readStateConfirmation = { prompts++; null })
+        val first = runtime()
+        assertTrue(first.academicAuthorizationDescription().contains("Synthetic seen"))
+        first.authorizeAcademicSession(remember = true, includeReadState = true)
+        repeat(3) { refresh(first) }; first.close()
+        val reopened = runtime(); assertTrue(reopened.authenticated); refresh(reopened)
+        session.invalidate(); UserManager.getInstance().saveCookieLogin("fixture=renewed")
+        session = AcademicGatewayFactory.sharedSession(school, UserManager.getInstance().currentAccountStorageKey)!!; capture()
+        assertFalse(reopened.authenticated)
+        assertTrue(reopened.restoreAcademicAuthorization()); refresh(reopened); reopened.close()
+        assertEquals(0, prompts)
+        val final = runtime(); assertTrue(final.authenticated)
+        final.logout(); final.close()
+        val revoked = runtime(); assertFalse(revoked.authenticated); revoked.close()
+    }
+
+    @Test fun anExistingLoginConsentNeedsOnlyOneReadStatePromptAcrossRefreshes() = runBlocking {
+        reviewedProvider(); val pkg = install(serviceManifest("test.refresh-upgrade")); var prompts = 0
+        val runtime = ServicePluginSession(refreshContext(), pkg, "account", readStateConfirmation = { prompts++; true })
+        runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession(remember = true)
+        repeat(3) { refresh(runtime) }
+        assertEquals(1, prompts); runtime.close()
+    }
+
+    @Test fun onceOnlyGroupedConsentNeverBecomesPermanentAfterRelogin() = runBlocking {
+        reviewedProvider(); val pkg = install(serviceManifest("test.refresh-once"))
+        val runtime = ServicePluginSession(refreshContext(), pkg, "account")
+        runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession(includeReadState = true)
+        repeat(2) { refresh(runtime) }; runtime.close()
+        session.invalidate(); UserManager.getInstance().saveCookieLogin("fixture=renewed")
+        session = AcademicGatewayFactory.sharedSession(school, UserManager.getInstance().currentAccountStorageKey)!!; capture()
+        val reopened = ServicePluginSession(refreshContext(), pkg, "account")
+        assertFalse(reopened.authenticated); assertFalse(reopened.restoreAcademicAuthorization()); reopened.close()
+    }
+
+    @Test fun deniedReadStateAndRevocationWhilePromptingNeverSendARequest() = runBlocking {
+        reviewedProvider(); val pkg = install(serviceManifest("test.refresh-denied")); var prompts = 0
+        val runtime = ServicePluginSession(refreshContext(), pkg, "account", readStateConfirmation = { prompts++; null })
+        runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession(remember = true)
+        val before = server.requestCount
+        assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
+        assertEquals(1, prompts); assertEquals(before, server.requestCount); runtime.close()
+        val revoked = ServicePluginSession(refreshContext(), pkg, "account", readStateConfirmation = {
+            PluginAcademicSession.revoke(app, pkg.manifest.id); true
+        })
+        assertThrows(AcademicException::class.java) { runBlocking { revoked.page("main") } }
+        assertEquals(before, server.requestCount); revoked.close()
+        assertNull(access(pkg).existingGrant())
+    }
+
+    @Test fun groupedReadStateConsentDoesNotAuthorizeUnknownHighRiskRawOrExpandedRequests() = runBlocking {
+        reviewedProvider(); val pkg = install(serviceManifest("test.refresh-boundary")); var next = seen(); var prompts = 0
+        val runtime = ServicePluginSession(refreshContext { listOf(next) }, pkg, "account", requestConfirmation = { _, _, _ -> prompts++; false })
+        runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession(remember = true, includeReadState = true)
+        val before = server.requestCount
+        for (bad in listOf(seen("unapproved-target"), seen().apply { getJSONObject("form").put("payload", secret) },
+            seen().apply { remove("form"); put("body", "id=one") }, request("/jw/api/unknown"),
+            request("/jw/api/submit").put("method", "POST").put("purpose", "mutation"), request("/jw/api/submit").put("method", "POST"))) {
+            next = bad
+            assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
+        }
+        assertEquals(before, server.requestCount)
+        // Unknown and high-risk calls still require individual approval; malformed
+        // bodies, invalid parameters and a forged query purpose fail before any prompt.
+        assertEquals(2, prompts)
+        next = seen(); server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/jw/api/submit"))
+        assertEquals(AcademicStatus.RESULT_UNKNOWN, assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }.status)
+        assertEquals(before + 1, server.requestCount); runtime.close()
+    }
+
+    @Test fun simultaneousNativeLoginRequestsShareOnePromptAndReadStateEffectsReuseIt() = runBlocking {
+        reviewedProvider(); val pkg = caller("test.native-refresh"); var prompts = 0
+        val ui = object : NativePluginInteraction by interaction {
+            override suspend fun consent(title: String, message: String) = choose("$title\n$message", NativePluginInteraction.CONSENT_CHOICES)
+            override suspend fun choose(title: String, choices: List<Pair<String, String>>): String? {
+                prompts++; assertTrue(title.contains("Synthetic seen")); delay(20); return "remember"
+            }
+            override suspend fun confirm(title: String, message: String): Boolean { prompts++; return false }
+        }
+        val local = AcademicSession(AcademicSessionKey("native-consent", "synthetic"), url("/").toString())
+        val native = NativeCapabilityHost(app, pkg, local, ui) { true }
+        try {
+            val grants = coroutineScope { List(2) { async { native.execute(effect("academic.session.authorize", JSONObject()), NativeFlow(true)) as JSONObject } }.awaitAll() }
+            assertEquals(grants[0].getString("grant"), grants[1].getString("grant")); assertEquals(1, prompts)
+            repeat(3) {
+                server.enqueue(MockResponse().setBody("{}"))
+                native.execute(effect("academic.session.request", JSONObject().put("grant", grants[0].getString("grant")).put("request", seen()), 2), NativeFlow(true))
+                server.takeRequest(2, TimeUnit.SECONDS)
+            }
+            assertEquals(1, prompts)
+        } finally { native.close(); local.retire() }
+    }
 
     @Test fun servicePagesAndActionsShareAfterConsentAndReopenWithoutAnotherLogin() = runBlocking {
         capture()

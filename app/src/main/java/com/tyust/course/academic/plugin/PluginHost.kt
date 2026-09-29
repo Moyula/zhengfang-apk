@@ -28,7 +28,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
     private val sharedToken: ((HttpUrl) -> Pair<String, String>?)? = null,
     private val tokenSession: com.tyust.course.academic.AcademicSession = operation.session,
     private val dataGuard: PluginDataGuard? = null,
-    private val sharedApproval: ((JSONObject) -> Unit)? = null,
+    private val sharedApproval: ((JSONObject) -> Boolean)? = null,
     private val sharedRequest: ((HttpUrl, String, String, JSONObject?) -> Unit)? = null) {
     private val cookiesForResponse: (HttpUrl) -> List<String> = { url -> cookies.loadForRequest(url).map { it.value } }
     private val policy = PluginNetworkPolicy(operation.manifest.network)
@@ -90,7 +90,10 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
         val charsetName = payload.optString("charset", "UTF-8")
         if (charsetName !in setOf("UTF-8", "GBK", "GB2312", "GB18030")) invalid("不支持的编码")
         val charset = Charset.forName(charsetName)
-        sharedApproval?.invoke(JSONObject(payload.toString()))
+        // Reject invalid destinations before asking the user anything.
+        policy.requireAllowed(url, method, purpose, form)
+        sharedRequest?.invoke(url, method, purpose, form)
+        val approvedReadState = sharedApproval?.invoke(JSONObject(payload.toString())) == true
         val supplied = JSONObject((payload.optJSONObject("headers") ?: JSONObject()).toString())
         // Only the host's authorized shared-session path supplies this callback.
         sharedRequest?.invoke(url, method, purpose, form)
@@ -181,7 +184,10 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
                     supplied.optString("Content-Type", "application/x-www-form-urlencoded; charset=$charsetName").toMediaType())
                 builder.post(body)
             }
-            if (purpose == "mutation") operation.markMutation()
+            if (purpose == "mutation") {
+                if (approvedReadState && sharedRequest != null) operation.markReviewedReadState()
+                else operation.markMutation()
+            }
             val call = transport.newCall(builder.build())
             operation.register(call)
             dataGuard?.track(operation)

@@ -31,6 +31,17 @@ import org.json.JSONObject
 class ServicePluginActivity : ComponentActivity() {
     private data class RequestPrompt(val url: String, val method: String, val purpose: String, val answer: CompletableDeferred<Boolean>)
     private var requestPrompt by mutableStateOf<RequestPrompt?>(null)
+    private data class ReadStatePrompt(val rule: JSONObject, val answer: CompletableDeferred<Boolean?>)
+    private var readStatePrompt by mutableStateOf<ReadStatePrompt?>(null)
+    private fun confirmReadState(rule: JSONObject): Boolean? {
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
+        return runBlocking { withContext(Dispatchers.Main) {
+            val prompt = ReadStatePrompt(rule, CompletableDeferred())
+            readStatePrompt = prompt
+            try { withTimeout(120_000) { prompt.answer.await() } }
+            finally { if (readStatePrompt === prompt) readStatePrompt = null }
+        } }
+    }
     private fun confirmRequest(url: String, method: String, purpose: String): Boolean {
         check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
         return runBlocking { withContext(Dispatchers.Main) {
@@ -40,7 +51,11 @@ class ServicePluginActivity : ComponentActivity() {
             finally { if (requestPrompt === prompt) requestPrompt = null }
         } }
     }
-    override fun onDestroy() { requestPrompt?.answer?.complete(false); requestPrompt = null; super.onDestroy() }
+    override fun onDestroy() {
+        requestPrompt?.answer?.complete(false); requestPrompt = null
+        readStatePrompt?.answer?.complete(null); readStatePrompt = null
+        super.onDestroy()
+    }
     private var openedScope: String? = null
     private var preview = false
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,7 +79,8 @@ class ServicePluginActivity : ComponentActivity() {
                 require(preview || school != null && AcademicProviderRegistry.matches(pkg, school) && AcademicProviderRegistry.isEnabled(pkg.manifest.id, school)) { "请先切换到此服务对应的学校并启用插件" }
                 val scope = if (preview) "preview:${pkg.digest}" else accountScope()
                 openedScope = scope
-                runtime = ServicePluginSession(this@ServicePluginActivity, pkg, scope, requestConfirmation = ::confirmRequest) {
+                runtime = ServicePluginSession(this@ServicePluginActivity, pkg, scope,
+                    requestConfirmation = ::confirmRequest, readStateConfirmation = ::confirmReadState) {
                     (preview || school != null && AcademicProviderRegistry.isEnabled(pkg.manifest.id, school) && scope == accountScope())
                 }
             } catch (e: CancellationException) { throw e }
@@ -82,6 +98,14 @@ class ServicePluginActivity : ComponentActivity() {
                 content = { Text("${prompt.method} ${prompt.url}\n此端点未由教务提供者声明为只读，可能改变服务器数据。仅允许本次请求？") },
                 confirmButton = { TextButton({ prompt.answer.complete(true) }) { Text("仅本次") } },
                 dismissButton = { TextButton({ prompt.answer.complete(false) }) { Text("拒绝") } })
+        }
+        readStatePrompt?.let { prompt ->
+            SystemDialog(onDismissRequest = { prompt.answer.complete(null) }, title = { Text(prompt.rule.getString("title")) },
+                content = { Text("允许此已审核的状态更新？记住后，刷新时不再重复询问。\n${prompt.rule.getString("method")} ${prompt.rule.getString("origin")}${prompt.rule.getString("path")}\n仅适用于当前账号、此端点及其审核过的参数范围。") },
+                confirmButton = { Row {
+                    TextButton({ prompt.answer.complete(false) }) { Text("仅本次") }
+                    TextButton({ prompt.answer.complete(true) }) { Text("允许并记住") }
+                } }, dismissButton = { TextButton({ prompt.answer.complete(null) }) { Text("拒绝") } })
         }
     }
 
@@ -178,11 +202,14 @@ class ServicePluginActivity : ComponentActivity() {
                     TextButton(onClick = { PluginFeedback.open(this@ServicePluginActivity, pkg) }) { Text("快捷反馈") }
                 }
                 if (!loggedIn && runtime.sharesAcademicSession) {
-                    InsetGroupedSection(header = "使用本校教务登录", footer = "授权仅用于本校声明范围内的请求，可随时撤销；提交操作仍需确认。") {
+                    InsetGroupedSection(header = "使用本校教务登录", footer = "记住授权后，关闭页面或同账号重登无需再次确认。可在插件详情中撤销。") {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                             Text("使用已登录的教务账号，无需再次输入密码。教务登录过期时，请先重新登录本校账号。")
                             LiquidButton({
-                                try { pendingAcademicAuthorization = runtime.academicAuthorizationDescription() }
+                                try {
+                                    if (runtime.restoreAcademicAuthorization()) load(history.last().first, history.last().second)
+                                    else pendingAcademicAuthorization = runtime.academicAuthorizationDescription()
+                                }
                                 catch (e: Exception) { message = e.message ?: "无法取得本校登录会话" }
                             }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("service-academic-authorize"), style = LiquidButtonStyle.Tinted) { Text("授权使用本校登录") }
                         }
@@ -226,8 +253,11 @@ class ServicePluginActivity : ComponentActivity() {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         LiquidButton({ val current = history.last(); load(current.first, current.second) }, enabled = !busy && !native.busy, modifier = Modifier.weight(1f), horizontalPadding = 8.dp) { Text("刷新") }
                         LiquidButton({ editing = !editing }, enabled = !busy && !native.busy && page != null, modifier = Modifier.weight(1f), horizontalPadding = 8.dp) { Text(if (editing) "完成排布" else "调整排布") }
-                        if (runtime.needsLogin || runtime.sharesAcademicSession) LiquidButton({ runtime.logout(); loggedIn = false; page = null; captcha = null }, enabled = !busy && !native.busy,
-                            modifier = Modifier.testTag("service-logout"), horizontalPadding = 12.dp) { Text(if (runtime.sharesAcademicSession) "撤销授权" else "退出") }
+                        if (runtime.needsLogin || runtime.sharesAcademicSession) LiquidButton({
+                            if (runtime.sharesAcademicSession) finish()
+                            else { runtime.logout(); loggedIn = false; page = null; captcha = null }
+                        }, enabled = !busy && !native.busy,
+                            modifier = Modifier.testTag("service-logout"), horizontalPadding = 12.dp) { Text(if (runtime.sharesAcademicSession) "关闭页面" else "退出") }
                     }
                     val current = page
                     if (current != null) {
@@ -274,13 +304,13 @@ class ServicePluginActivity : ComponentActivity() {
                 content = { Text(description) },
                 confirmButton = { Row {
                     TextButton({ pendingAcademicAuthorization = null; run {
-                        runtime.authorizeAcademicSession(false)
+                        runtime.authorizeAcademicSession(false, includeReadState = true)
                         page = withContext(Dispatchers.IO) { runtime.page(history.last().first, history.last().second) }
                     } }) { Text("仅本次") }
                     TextButton({ pendingAcademicAuthorization = null; run {
-                        runtime.authorizeAcademicSession(true)
+                        runtime.authorizeAcademicSession(true, includeReadState = true)
                         page = withContext(Dispatchers.IO) { runtime.page(history.last().first, history.last().second) }
-                    } }) { Text("记住此范围") }
+                    } }) { Text("允许并记住") }
                 } },
                 dismissButton = { TextButton({ pendingAcademicAuthorization = null }) { Text("取消") } })
         }

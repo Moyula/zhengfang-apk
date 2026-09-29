@@ -8,6 +8,7 @@ import org.json.JSONObject
 class ServicePluginSession(
     private val app: Context, val pkg: PluginPackage, private val accountScope: String,
     private val requestConfirmation: ((String, String, String) -> Boolean)? = null,
+    private val readStateConfirmation: ((JSONObject) -> Boolean?)? = null,
     private val scopeStillActive: () -> Boolean = { true }
 ) {
     private val school = pkg.manifest.school
@@ -28,10 +29,7 @@ class ServicePluginSession(
     init {
         require(pkg.manifest.isService)
         ServicePluginContract.validateManifest(pkg.manifest)
-        if (sharesAcademicSession) runCatching {
-            val access = PluginAcademicSession(app, pkg, { !closed && scopeStillActive() }).also { it.confirmUnknownRequest = requestConfirmation }
-            access.existingGrant()?.let { adopt(access, it) }
-        }
+        if (sharesAcademicSession) runCatching { restoreAcademicAuthorization() }
     }
 
     private fun createAdapter(username: String, requestBase: String = baseUrl, academicKey: AcademicSessionKey? = null): PluginAcademicAdapter {
@@ -44,18 +42,30 @@ class ServicePluginSession(
 
     fun academicAuthorizationDescription(): String {
         ensureScope(); check(sharesAcademicSession)
-        val access = PluginAcademicSession(app, pkg, { !closed && scopeStillActive() }).also { it.confirmUnknownRequest = requestConfirmation }
+        val access = academicAccess()
         val description = access.description()
         access.requireCredentials()
         sharedAccess = access; sharedGrant = ""
         return description
     }
+    /** A renewed school login needs a fresh handle, not another consent dialog. */
+    fun restoreAcademicAuthorization(): Boolean {
+        ensureScope(); check(sharesAcademicSession)
+        val access = academicAccess()
+        val grant = access.existingGrant() ?: return false
+        adopt(access, grant)
+        return true
+    }
+    private fun academicAccess() = PluginAcademicSession(app, pkg, { !closed && scopeStillActive() }).also {
+        it.confirmUnknownRequest = requestConfirmation
+        it.confirmReadStateRequest = readStateConfirmation
+    }
     /** Called by the host only after the user confirms the displayed authorization. */
-    fun authorizeAcademicSession(remember: Boolean = false) {
+    fun authorizeAcademicSession(remember: Boolean = false, includeReadState: Boolean = false) {
         ensureScope(); check(sharesAcademicSession)
         val access = checkNotNull(sharedAccess) { "请先确认共享教务登录的授权范围" }
         access.requireCredentials()
-        adopt(access, access.authorize(remember).getString("grant"))
+        adopt(access, access.authorize(remember, includeReadState).getString("grant"))
     }
     private fun adopt(access: PluginAcademicSession, grant: String) {
         access.requireGrant(grant); access.requireCredentials()
