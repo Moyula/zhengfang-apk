@@ -57,7 +57,9 @@ class PluginPrivacyPolicyTest {
         assertTrue(PluginDataGuard(app, receiver).sensitive())
         assertThrows(PluginException::class.java) { target.requireNetwork("https://analysis.example".toHttpUrl()) }
     }
-    @Test fun actualSecretsCannotLeakInTextBinaryEncodingOrUrl() {
+    @Test
+    @Config(sdk = [24, 32])
+    fun actualSecretsCannotLeakInTextBinaryEncodingOrUrl() {
         for (body in listOf("cookie=synthetic-secret", "c3ludGhldGljLXNlY3JldA=="))
             assertThrows(PluginException::class.java) { PluginSecretResponse.requireSafe(body.toByteArray(), "https://school.example", listOf("synthetic-secret")) }
         assertThrows(PluginException::class.java) { PluginSecretResponse.requireSafe("ok".toByteArray(), "https://school.example/?t=synthetic-secret", listOf("synthetic-secret")) }
