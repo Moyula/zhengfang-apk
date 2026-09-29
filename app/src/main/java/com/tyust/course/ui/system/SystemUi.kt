@@ -258,7 +258,11 @@ fun SystemTopBar(
             )
             else -> Modifier
         }
-        Box(modifier = Modifier.fillMaxWidth().then(shellModifier)) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            // Shell visibility belongs to the glass only. At rest on a preset
+            // wallpaper collapse is zero; applying this layer to the parent also
+            // hides the title, subtitle and buttons until the user scrolls.
+            Box(Modifier.matchParentSize().then(shellModifier))
             // 展开态：大标题背后铺一层自上而下的软渐变，
             // 内容滚入标题区域时被渐隐吞没而不是直接撞字；随折叠淡出交棒给玻璃条。
             if (collapse < 0.99f && !customWallpaper) {
