@@ -42,7 +42,7 @@ internal class PluginAcademicSession(
         if (caller.manifest.sharesAcademicSession) ServicePluginContract.validateManifest(caller.manifest)
         else if ("academic.session" !in caller.manifest.permissions || "network" !in caller.manifest.permissions)
             denied("插件需要声明教务登录共享和网络权限")
-        if (!active() || !callerCurrent() || school == null || !user.isLoggedIn || user.sessionState.state.value.expired ||
+        if (prefs.getLong(revocationKey, 0L) != capturedRevocation || !active() || !callerCurrent() || school == null || !user.isLoggedIn || user.sessionState.state.value.expired ||
             account.isBlank() || account != user.currentAccountStorageKey || !user.sessionState.isCurrent(token) ||
             school.toJson().toString() != user.currentSchool?.toJson()?.toString() || session.retired || session.epoch != epoch ||
             AcademicGatewayFactory.sharedSession(school, account) !== session ||
@@ -53,10 +53,19 @@ internal class PluginAcademicSession(
             throw PluginException(PluginErrorCode.STALE_CONTEXT, "教务账号、学校或插件已改变，请重新授权")
     }
 
-    fun authorized(): Boolean { requireCurrent(); return !prefs.getString(key, null).isNullOrBlank() }
+    private val consentKey = prefix(caller.manifest.id) + "consent:" + PluginConsentPolicy.identity(
+        caller, account, school?.toJson().toString(), tokenProvider ?: provider)
+    private val revocationKey = prefix(caller.manifest.id) + "revocation"
+    private val capturedRevocation = prefs.getLong(revocationKey, 0L)
+    fun authorized(): Boolean { requireCurrent(); return existingGrant() != null }
+    fun remembered(): Boolean { requireCurrent(); return prefs.getBoolean(consentKey, false) }
+
 
     /** Restoring a grant must never recreate one after a concurrent revocation. */
-    fun existingGrant(): String? { requireCurrent(); return prefs.getString(key, null)?.takeIf(String::isNotBlank) }
+    fun existingGrant(): String? = synchronized(user.sessionState) { synchronized(grantLock) {
+        requireCurrent()
+        prefs.getString(key, null)?.takeIf(String::isNotBlank) ?: if (remembered()) authorize().getString("grant") else null
+    } }
 
     fun requireCredentials() {
         requireCurrent()
@@ -80,19 +89,20 @@ internal class PluginAcademicSession(
         if (ranges.isBlank()) denied("插件未声明当前教务站点的网络范围")
         val label = user.username.ifBlank { user.studentId.orEmpty() }.let { if (it.length > 4) it.take(2) + "••••" + it.takeLast(2) else it }
         return "允许 ${caller.manifest.name} 使用 ${school!!.name} 的已登录账号 $label？\n\n" +
-            "访问范围：$ranges\n共享限于 ${base.toString().trimEnd('/')} 下的教务请求。提交操作仍需逐次确认。可在插件详情中撤销。"
+            "访问范围：$ranges\n共享限于 ${base.toString().trimEnd('/')} 下的教务请求。高风险提交仍需确认。记住的授权只适用于当前账号和此范围，可在插件详情中撤销。"
     }
 
     /** Called only after the host confirmation completes; recheck every captured identity. */
-    fun authorize(): JSONObject = synchronized(user.sessionState) { synchronized(grantLock) {
+    fun authorize(remember: Boolean = false): JSONObject = synchronized(user.sessionState) { synchronized(grantLock) {
         requireCurrent()
         val grant = prefs.getString(key, null) ?: UUID.randomUUID().toString().let { value ->
             val edit = prefs.edit()
-            prefs.all.keys.filter { it.startsWith(prefix(caller.manifest.id)) && it != key }.forEach {
+            prefs.all.keys.filter { it.startsWith(prefix(caller.manifest.id)) && it != key && !it.contains(":consent:") && it != revocationKey }.forEach {
                 edit.remove(it); running.remove(it)?.forEach(PluginOperation::close)
             }
             check(edit.putString(key, value).commit()); value
         }
+        if (remember) check(prefs.edit().putBoolean(consentKey, true).commit())
         JSONObject().put("grant", grant).put("schoolName", school!!.name).put("baseUrl", base.toString())
     } }
 
@@ -108,6 +118,54 @@ internal class PluginAcademicSession(
             url.encodedPath != prefix && !url.encodedPath.startsWith("$prefix/"))
             throw PluginException(PluginErrorCode.UNTRUSTED_URL, "共享登录仅可用于当前学校教务地址范围")
         PluginNetworkPolicy(caller.manifest.network).requireAllowed(url, method, purpose, form)
+        PluginSharedOperation.match(tokenProvider ?: provider, url, method, purpose, form)
+        val authority = tokenProvider ?: provider
+        if (authority != null) {
+            PluginNetworkPolicy(authority.manifest.network).requireAllowed(url, method, purpose, form)
+            val authPath = authority.manifest.json.optJSONObject("academicSessionToken")?.optJSONObject("response")?.optString("path")
+            if (!authPath.isNullOrBlank() && url.encodedPath == base.encodedPath.trimEnd('/') + authPath)
+                throw PluginException(PluginErrorCode.PERMISSION_DENIED, "共享插件不能读取认证令牌提取端点")
+        }
+    }
+
+    var confirmUnknownRequest: ((String, String, String) -> Boolean)? = null
+    fun requireReviewedReadOrConfirmation(request: JSONObject) {
+        requireCurrent()
+        if (operation(request)?.optString("risk") == "read" && request.getString("purpose") == "query") return
+        if (confirmUnknownRequest?.invoke(request.getString("url"), request.optString("method", "GET"), request.getString("purpose")) != true)
+            denied("未经提供者审核的端点需要逐次明确确认")
+        requireCurrent()
+    }
+    fun operation(request: JSONObject): JSONObject? {
+        requireCurrent()
+        val url = request.getString("url").toHttpUrlOrNull()
+            ?: throw PluginException(PluginErrorCode.UNTRUSTED_URL, "地址无效")
+        // Free-form bodies cannot receive endpoint-scoped reusable authorization.
+        if (request.has("body")) return null
+        return PluginSharedOperation.match(tokenProvider ?: provider, url, request.optString("method", "GET"),
+            request.getString("purpose"), request.optJSONObject("form"))
+    }
+    fun reusableAction(id: String): JSONObject? {
+        requireCurrent()
+        val authority = tokenProvider ?: provider ?: return null
+        if (!authority.bundled && (!authority.official || authority.publisher == null)) return null
+        return authority.manifest.json.optJSONArray("sharedOperations")?.let(PluginJson::objects).orEmpty()
+            .singleOrNull { it.optString("id") == id && it.optString("risk") == "read-state" }
+    }
+    fun rememberedAction(id: String): Boolean = reusableAction(id)?.let(::operationRemembered) == true
+    fun requireRememberedAction(id: String, url: HttpUrl, method: String, purpose: String, form: JSONObject?) {
+        val rule = PluginSharedOperation.match(tokenProvider ?: provider, url, method, purpose, form)
+            ?: denied("记住的操作不能请求未经审核的端点")
+        if (purpose == "query" && rule.optString("risk") == "read") return
+        if (rule.optString("id") != id || rule.optString("risk") != "read-state" || !operationRemembered(rule))
+            denied("请求超出记住的操作范围")
+    }
+    private fun operationKey(rule: JSONObject) = consentKey + ":operation:" + PluginJson.sha256(PluginJson.canonical(rule).toByteArray())
+    fun operationRemembered(rule: JSONObject): Boolean { requireCurrent(); return prefs.getBoolean(operationKey(rule), false) }
+    fun rememberOperation(rule: JSONObject) = synchronized(grantLock) {
+        requireCurrent()
+        if (rule.optString("risk") != "read-state") throw PluginException(PluginErrorCode.PERMISSION_DENIED, "此操作不能免确认")
+        check(prefs.edit().putBoolean(operationKey(rule), true).commit())
     }
 
     fun cookies(grant: String): CookieJar = object : CookieJar {
@@ -141,6 +199,7 @@ internal class PluginAcademicSession(
             prefs.all.keys.filter { it.startsWith(prefix(id)) }.forEach { key ->
                 edit.remove(key); running.remove(key)?.forEach(PluginOperation::close)
             }
+            edit.putLong(prefix(id) + "revocation", prefs.getLong(prefix(id) + "revocation", 0L) + 1L)
             check(edit.commit())
         }
         private fun denied(message: String): Nothing = throw PluginException(PluginErrorCode.PERMISSION_DENIED, message)

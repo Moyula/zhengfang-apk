@@ -50,17 +50,25 @@ class PluginAcademicAdapter(
         if (method !in pinned.manifest.capabilities)
             return (base as? PluginAcademicAdapter)?.invoke(method, args, confirmed) ?: unsupported(method)
         return session.withProtocolLock {
-        ServicePluginContract.requireRequest(pinned.manifest, method, args, confirmed)
-        val op = PluginOperation(session, pinned.manifest, method, development = !pinned.official && !pinned.bundled, confirmed = confirmed,
+        val reusableAction = if (!confirmed && method == "service.action" && shared?.rememberedAction(args.optString("actionId")) == true) args.getString("actionId") else null
+        val effectiveConfirmation = confirmed || reusableAction != null
+        ServicePluginContract.requireRequest(pinned.manifest, method, args, effectiveConfirmation)
+        val op = PluginOperation(session, pinned.manifest, method, development = !pinned.official && !pinned.bundled, confirmed = effectiveConfirmation,
             actionId = if (method == "service.action") args.getString("actionId") else null,
             scopeStillActive = { shared?.requireGrant(grant); scopeStillActive() })
         val tokenCapture = if (method.startsWith("auth.") && pinned.manifest.isAcademic && pinned.manifest.json.has("academicSessionToken"))
             PluginAcademicTokenCapture(op, pinned) else null
         val host = PluginHost(op, storageRoot, shared?.cookies(grant) ?: session.cookies,
             captureToken = tokenCapture?.let { it::capture },
+            sharedApproval = shared?.let { access -> { request ->
+                if (!confirmed && reusableAction == null) access.requireReviewedReadOrConfirmation(request)
+                if (reusableAction != null && request.has("body")) throw PluginException(PluginErrorCode.PERMISSION_DENIED, "可复用操作仅接受审核过的结构化参数")
+            } },
             sharedToken = shared?.let { access -> { url -> access.tokenHeader(grant, url) } },
-            sharedRequest = shared?.let { access -> { url, verb, purpose, form -> access.requireRequest(grant, url, verb, purpose, form) } },
-            tokenSession = shared?.session ?: session)
+            sharedRequest = shared?.let { access -> { url, verb, purpose, form -> access.requireRequest(grant, url, verb, purpose, form)
+                if (reusableAction != null) access.requireRememberedAction(reusableAction, url, verb, purpose, form)
+            } },
+            tokenSession = shared?.session ?: session, dataGuard = if (pinned.manifest.isService || pinned.manifest.isNative && !pinned.manifest.isAcademic) PluginDataGuard(app, pinned) else null)
         val sharedCredential = shared?.session?.pluginToken
         val lease = PluginVersionLeases.acquire(pinned.manifest.id)
         try {

@@ -65,7 +65,7 @@ private data class PagePrompt(val title: String, val message: String, val challe
             accounts.current(pkg, session) && AcademicProviderRegistry.isCurrentPackage(pkg.manifest.id, pkg.digest) && AcademicProviderRegistry.isEnabled(pkg.manifest.id) &&
             (commandId != null || PluginPages.registry.page(route) != null) && (serverId == null || accounts.selected(pkg.manifest.id, serverId) == serviceAccount) } }
         val interaction = rememberPageInteraction(pkg.manifest.name, onNavigate, onBack)
-        val host = remember { NativeCapabilityHost(context, pkg, session, interaction, active) }
+        val host = remember { NativeCapabilityHost(context, pkg, session, interaction, active = active) }
         DisposableEffect(host) { onDispose { host.close(); live.set(false); session.retire() } }
         if (page?.renderer == "web") {
             PluginWebPage(pkg, page.copy(params = pageParams), session, interaction, active)

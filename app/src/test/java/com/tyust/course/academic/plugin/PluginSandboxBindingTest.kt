@@ -94,11 +94,11 @@ class PluginSandboxBindingTest {
         session.retire()
     }
 
-    @Test fun privateServiceKeepsSeparateProcessWithoutAnIsolatedUid() {
+    @Test fun privateServiceUsesAnIsolatedUidAndIsNotExported() {
         val info = app.packageManager.getServiceInfo(ComponentName(app, PluginSandboxService::class.java), 0)
         assertEquals(app.packageName + ":academic_plugin", info.processName)
         assertFalse(info.exported)
-        assertEquals(0, info.flags and ServiceInfo.FLAG_ISOLATED_PROCESS)
+        assertEquals(ServiceInfo.FLAG_ISOLATED_PROCESS, info.flags and ServiceInfo.FLAG_ISOLATED_PROCESS)
     }
     @Test fun failedBindDoesNotExecuteOrUnbindANonexistentConnection() = runTest {
         val context = BindingContext(app) { false }

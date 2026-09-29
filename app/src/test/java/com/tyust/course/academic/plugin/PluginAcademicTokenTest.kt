@@ -151,7 +151,7 @@ class PluginAcademicTokenTest {
         session.cookies.saveFromResponse(url("/jw/api/me"), listOf(okhttp3.Cookie.Builder().name("session").value("school-cookie").hostOnlyDomain("127.0.0.1").path("/jw").build()))
         for (id in listOf("test.service-a", "test.service-b")) {
             val pkg = install(serviceManifest(id))
-            val runtime = ServicePluginSession(serviceContext(), pkg, "fixture-account")
+            val runtime = ServicePluginSession(serviceContext(), pkg, "fixture-account", requestConfirmation = { _, _, _ -> true })
             assertFalse(runtime.authenticated)
             assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
             assertFalse(runtime.academicAuthorizationDescription().contains(secret))
@@ -169,20 +169,20 @@ class PluginAcademicTokenTest {
             val privateSession = runtime.session
             runtime.close()
             assertTrue(privateSession.retired); assertFalse(session.retired); assertNotNull(session.pluginToken)
-            val reopened = ServicePluginSession(serviceContext(), pkg, "fixture-account")
+            val reopened = ServicePluginSession(serviceContext(), pkg, "fixture-account", requestConfirmation = { _, _, _ -> true })
             assertTrue(reopened.authenticated); assertNotSame(privateSession, reopened.session)
             server.enqueue(MockResponse().setBody("{}")); reopened.page("main")
             assertEquals(secret, server.takeRequest(2, TimeUnit.SECONDS)!!.getHeader("X-Token"))
             reopened.logout(); assertFalse(reopened.authenticated); assertNotNull(session.pluginToken)
             reopened.close()
-            val revoked = ServicePluginSession(serviceContext(), pkg, "fixture-account")
+            val revoked = ServicePluginSession(serviceContext(), pkg, "fixture-account", requestConfirmation = { _, _, _ -> true })
             assertFalse(revoked.authenticated); revoked.close()
         }
     }
 
     @Test fun serviceRevocationDuringSandboxExecutionBlocksTheRequest() = runBlocking {
         capture(); val pkg = install(serviceManifest("test.service-revoke"))
-        val runtime = ServicePluginSession(serviceContext(beforeRequest = { PluginAcademicSession.revoke(app, pkg.manifest.id) }), pkg, "account")
+        val runtime = ServicePluginSession(serviceContext(beforeRequest = { PluginAcademicSession.revoke(app, pkg.manifest.id) }), pkg, "account", requestConfirmation = { _, _, _ -> true })
         runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession()
         assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
         assertEquals(1, server.requestCount); assertFalse(runtime.authenticated); assertNotNull(session.pluginToken)
@@ -191,12 +191,12 @@ class PluginAcademicTokenTest {
 
     @Test fun serviceExpiryClearsTheSchoolTokenInsteadOfOnlyItsPrivateSession() = runBlocking {
         capture(); val pkg = install(serviceManifest("test.service-expiry"))
-        val runtime = ServicePluginSession(serviceContext(), pkg, "account")
+        val runtime = ServicePluginSession(serviceContext(), pkg, "account", requestConfirmation = { _, _, _ -> true })
         runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession()
         server.enqueue(MockResponse().setResponseCode(401))
         assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
         assertNull(session.pluginToken); assertFalse(session.retired); assertFalse(runtime.authenticated)
-        val reopened = ServicePluginSession(serviceContext(), pkg, "account")
+        val reopened = ServicePluginSession(serviceContext(), pkg, "account", requestConfirmation = { _, _, _ -> true })
         assertFalse(reopened.authenticated); reopened.close()
         runtime.close()
     }
@@ -204,7 +204,7 @@ class PluginAcademicTokenTest {
     @Test fun sharedServiceChecksRedirectsAndRejectsExplicitTokenOverrides() = runBlocking {
         capture(); val pkg = install(serviceManifest("test.service-scope"))
         var next = request("/jw/api-evil/me")
-        val runtime = ServicePluginSession(serviceContext({ next }), pkg, "account")
+        val runtime = ServicePluginSession(serviceContext({ next }), pkg, "account", requestConfirmation = { _, _, _ -> true })
         runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession()
         assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
         next = request().put("headers", JSONObject().put("x-token", "override"))
@@ -217,13 +217,13 @@ class PluginAcademicTokenTest {
 
     @Test fun serviceConsentCannotSurviveSchoolSessionChangeOrProviderReplacement() {
         capture(); val pkg = install(serviceManifest("test.service-stale"))
-        val runtime = ServicePluginSession(serviceContext(), pkg, "account")
+        val runtime = ServicePluginSession(serviceContext(), pkg, "account", requestConfirmation = { _, _, _ -> true })
         runtime.academicAuthorizationDescription()
         session.invalidate()
         assertThrows(PluginException::class.java) { runtime.authorizeAcademicSession() }
         assertFalse(runtime.authenticated); runtime.close()
         capture()
-        val replaced = ServicePluginSession(serviceContext(), pkg, "account")
+        val replaced = ServicePluginSession(serviceContext(), pkg, "account", requestConfirmation = { _, _, _ -> true })
         replaced.academicAuthorizationDescription()
         AcademicProviderRegistry.choose(school, "builtin.zf")
         assertThrows(PluginException::class.java) { replaced.authorizeAcademicSession() }
@@ -233,12 +233,12 @@ class PluginAcademicTokenTest {
     @Test fun serviceReportedExpiryClearsTokenAndAccountSwitchPreventsAnyRequest() = runBlocking {
         capture(); val pkg = install(serviceManifest("test.service-account"))
         val context = RespondingSandboxContext(app) { _, _ -> PluginJson.error(PluginErrorCode.SESSION_EXPIRED, "Synthetic login expired") }
-        val expired = ServicePluginSession(context, pkg, "account")
+        val expired = ServicePluginSession(context, pkg, "account", requestConfirmation = { _, _, _ -> true })
         expired.academicAuthorizationDescription(); expired.authorizeAcademicSession()
         assertThrows(AcademicException::class.java) { runBlocking { expired.page("main") } }
         assertNull(session.pluginToken); expired.close()
         capture()
-        val switched = ServicePluginSession(serviceContext(), pkg, "account")
+        val switched = ServicePluginSession(serviceContext(), pkg, "account", requestConfirmation = { _, _, _ -> true })
         assertTrue(switched.authenticated)
         UserManager.getInstance().studentId = "another-synthetic-account"
         assertThrows(AcademicException::class.java) { runBlocking { switched.page("main") } }
@@ -251,7 +251,7 @@ class PluginAcademicTokenTest {
         session.cookies.saveFromResponse(url("/jw/api/me"), listOf(okhttp3.Cookie.Builder().name("session").value("school-cookie").hostOnlyDomain("127.0.0.1").path("/jw").build()))
         for (shared in listOf(false, true)) {
             val pkg = install(serviceManifest("test.cookie-$shared", shared))
-            val runtime = ServicePluginSession(serviceContext(), pkg, "account")
+            val runtime = ServicePluginSession(serviceContext(), pkg, "account", requestConfirmation = { _, _, _ -> true })
             if (shared) { runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession() }
             server.enqueue(MockResponse().setBody("{}")); runtime.page("main")
             val sent = server.takeRequest(2, TimeUnit.SECONDS)!!
@@ -273,13 +273,13 @@ class PluginAcademicTokenTest {
 
     @Test fun sharedServicePreviewPartitionsPrivateStorageByActualAcademicAccount() {
         capture(); val pkg = install(serviceManifest("test.service-preview"))
-        val first = ServicePluginSession(serviceContext(), pkg, "preview:constant")
+        val first = ServicePluginSession(serviceContext(), pkg, "preview:constant", requestConfirmation = { _, _, _ -> true })
         first.academicAuthorizationDescription(); first.authorizeAcademicSession()
         val firstKey = first.session.key
         first.close(); session.retire()
         val user = UserManager.getInstance(); user.studentId = "second-synthetic-student"; user.saveCookieLogin("fixture=second")
         session = AcademicGatewayFactory.sharedSession(school, user.currentAccountStorageKey)!!; session.cookies.clear(); capture()
-        val second = ServicePluginSession(serviceContext(), pkg, "preview:constant")
+        val second = ServicePluginSession(serviceContext(), pkg, "preview:constant", requestConfirmation = { _, _, _ -> true })
         assertFalse(second.authenticated)
         second.academicAuthorizationDescription(); second.authorizeAcademicSession()
         assertNotEquals(firstKey, second.session.key)
@@ -392,15 +392,15 @@ class PluginAcademicTokenTest {
             server.enqueue(MockResponse().setBody("old client"))
             native.execute(effect("academic.session.request", JSONObject().put("grant", grant).put("request", request()), 1), NativeFlow(true))
             assertNull(server.takeRequest(2, TimeUnit.SECONDS)!!.getHeader("X-Token"))
-            server.enqueue(MockResponse().setBody("ordinary network"))
-            native.execute(effect("network.request", request(), 1), NativeFlow(true))
-            assertNull(server.takeRequest(2, TimeUnit.SECONDS)!!.getHeader("X-Token"))
+            // A shared-data reader cannot use ordinary networking to launder data.
+            try { native.execute(effect("network.request", request(), 1), NativeFlow(true)); fail("Undeclared disclosure must be blocked") }
+            catch (e: PluginException) { assertEquals(PluginErrorCode.PERMISSION_DENIED, e.code) }
             pkg.manifest.json.put("requires", JSONArray())
             try {
                 native.execute(effect("academic.session.request", JSONObject().put("grant", grant).put("request", request()), 2), NativeFlow(true))
                 fail("Version 2 needs an explicit capability requirement")
             } catch (e: PluginException) { assertEquals(PluginErrorCode.UNSUPPORTED, e.code) }
-            assertEquals(3, server.requestCount)
+            assertEquals(2, server.requestCount)
         } finally { native.close(); local.retire() }
     }
 }

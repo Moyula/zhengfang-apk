@@ -29,6 +29,18 @@ import kotlinx.coroutines.*
 import org.json.JSONObject
 
 class ServicePluginActivity : ComponentActivity() {
+    private data class RequestPrompt(val url: String, val method: String, val purpose: String, val answer: CompletableDeferred<Boolean>)
+    private var requestPrompt by mutableStateOf<RequestPrompt?>(null)
+    private fun confirmRequest(url: String, method: String, purpose: String): Boolean {
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
+        return runBlocking { withContext(Dispatchers.Main) {
+            val prompt = RequestPrompt(url, method, purpose, CompletableDeferred())
+            requestPrompt = prompt
+            try { withTimeout(120_000) { prompt.answer.await() } }
+            finally { if (requestPrompt === prompt) requestPrompt = null }
+        } }
+    }
+    override fun onDestroy() { requestPrompt?.answer?.complete(false); requestPrompt = null; super.onDestroy() }
     private var openedScope: String? = null
     private var preview = false
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,7 +64,7 @@ class ServicePluginActivity : ComponentActivity() {
                 require(preview || school != null && AcademicProviderRegistry.matches(pkg, school) && AcademicProviderRegistry.isEnabled(pkg.manifest.id, school)) { "请先切换到此服务对应的学校并启用插件" }
                 val scope = if (preview) "preview:${pkg.digest}" else accountScope()
                 openedScope = scope
-                runtime = ServicePluginSession(this@ServicePluginActivity, pkg, scope) {
+                runtime = ServicePluginSession(this@ServicePluginActivity, pkg, scope, requestConfirmation = ::confirmRequest) {
                     (preview || school != null && AcademicProviderRegistry.isEnabled(pkg.manifest.id, school) && scope == accountScope())
                 }
             } catch (e: CancellationException) { throw e }
@@ -65,6 +77,12 @@ class ServicePluginActivity : ComponentActivity() {
                 if (problem.isBlank()) CircularProgressIndicator() else Text(problem, color = MaterialTheme.colorScheme.error)
             }
         } else ServiceScreen(current)
+        requestPrompt?.let { prompt ->
+            SystemDialog(onDismissRequest = { prompt.answer.complete(false) }, title = { Text("确认未审核端点") },
+                content = { Text("${prompt.method} ${prompt.url}\n此端点未由教务提供者声明为只读，可能改变服务器数据。仅允许本次请求？") },
+                confirmButton = { TextButton({ prompt.answer.complete(true) }) { Text("仅本次") } },
+                dismissButton = { TextButton({ prompt.answer.complete(false) }) { Text("拒绝") } })
+        }
     }
 
     @Composable private fun ServiceScreen(runtime: ServicePluginSession) {
@@ -82,6 +100,8 @@ class ServicePluginActivity : ComponentActivity() {
         var password by remember { mutableStateOf("") }
         var captcha by remember { mutableStateOf<CaptchaChallenge?>(null) }
         var captchaCode by remember { mutableStateOf("") }
+        val dataGuard = remember(runtime) { PluginDataGuard(this@ServicePluginActivity, pkg) }
+        var pendingDisclosure by remember { mutableStateOf<String?>(null) }
         var pendingAction by remember { mutableStateOf<JSONObject?>(null) }
         var pendingAcademicAuthorization by remember { mutableStateOf<String?>(null) }
         var editing by remember { mutableStateOf(false) }
@@ -134,8 +154,14 @@ class ServicePluginActivity : ComponentActivity() {
                 ServicePluginContract.validateLink(pkg.manifest, action)
                 when (action.getString("type")) {
                     "page" -> load(action.getString("pageId"), action.optJSONObject("params") ?: JSONObject(), push = true)
-                    "url" -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(action.getString("url"))))
-                    "action" -> if (ServicePluginContract.action(pkg.manifest, action.getString("actionId")).getString("kind") == "mutation") pendingAction = JSONObject(action.toString()) else performAction(action, false)
+                    "url" -> {
+                        val url = action.getString("url")
+                        val destination = okhttp3.HttpUrl.Companion.run { url.toHttpUrl() }
+                        if (dataGuard.allowed(destination)) startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        else if (dataGuard.declaration(destination) != null) pendingDisclosure = url
+                        else throw PluginException(PluginErrorCode.PERMISSION_DENIED, "插件未声明此个人数据接收网站")
+                    }
+                    "action" -> if (ServicePluginContract.action(pkg.manifest, action.getString("actionId")).getString("kind") == "mutation" && !runtime.rememberedAction(action.getString("actionId"))) pendingAction = JSONObject(action.toString()) else performAction(action, false)
                     "native" -> native.request(action)
                 }
             } catch (e: Exception) { message = e.message ?: "无法打开此操作" }
@@ -230,13 +256,32 @@ class ServicePluginActivity : ComponentActivity() {
                 }
             }
         }
+        pendingDisclosure?.let { url ->
+            SystemDialog(onDismissRequest = { pendingDisclosure = null }, title = { Text("允许向网站提供个人数据") },
+                content = { Text("接收网站：$url。网站接收后，App 无法控制其后续使用。") },
+                confirmButton = { TextButton({
+                    pendingDisclosure = null
+                    try {
+                        runtime.requireActive()
+                        val destination = okhttp3.HttpUrl.Companion.run { url.toHttpUrl() }
+                        dataGuard.authorize(destination); dataGuard.requireNetwork(destination)
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    } catch (e: Exception) { message = e.message.orEmpty() }
+                }) { Text("允许此网站") } }, dismissButton = { TextButton({ pendingDisclosure = null }) { Text("拒绝") } })
+        }
         pendingAcademicAuthorization?.let { description ->
             SystemDialog(onDismissRequest = { pendingAcademicAuthorization = null }, title = { Text("授权使用教务登录") },
                 content = { Text(description) },
-                confirmButton = { TextButton({ pendingAcademicAuthorization = null; run {
-                    runtime.authorizeAcademicSession()
-                    page = withContext(Dispatchers.IO) { runtime.page(history.last().first, history.last().second) }
-                } }) { Text("允许") } },
+                confirmButton = { Row {
+                    TextButton({ pendingAcademicAuthorization = null; run {
+                        runtime.authorizeAcademicSession(false)
+                        page = withContext(Dispatchers.IO) { runtime.page(history.last().first, history.last().second) }
+                    } }) { Text("仅本次") }
+                    TextButton({ pendingAcademicAuthorization = null; run {
+                        runtime.authorizeAcademicSession(true)
+                        page = withContext(Dispatchers.IO) { runtime.page(history.last().first, history.last().second) }
+                    } }) { Text("记住此范围") }
+                } },
                 dismissButton = { TextButton({ pendingAcademicAuthorization = null }) { Text("取消") } })
         }
         pendingAction?.let { action ->
@@ -255,7 +300,13 @@ class ServicePluginActivity : ComponentActivity() {
                             "${field.getString("label")}：${label.take(160)}"
                         }
                     }.joinToString("\n"), style = MaterialTheme.typography.bodySmall)
-                } }, confirmButton = { TextButton({ pendingAction = null; performAction(action, true) }) { Text("确认操作") } },
+                } }, confirmButton = { Row {
+                    TextButton({ pendingAction = null; performAction(action, true) }) { Text("仅本次") }
+                    if (runtime.reusableAction(action.getString("actionId"))) TextButton({
+                        try { runtime.rememberAction(action.getString("actionId")); pendingAction = null; performAction(action, false) }
+                        catch (e: Exception) { message = e.message.orEmpty() }
+                    }) { Text("记住此操作范围") }
+                } },
                 dismissButton = { TextButton({ pendingAction = null }) { Text("取消") } })
         }
     }

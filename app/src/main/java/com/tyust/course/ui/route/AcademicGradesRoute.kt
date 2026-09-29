@@ -147,13 +147,20 @@ private fun AcademicGradesContent(school: SchoolConfig, account: String, provide
         catch (e: Exception) { if (sessions.isCurrent(expectedSession)) examError = loadError(e) }
         finally { if (sessions.isCurrent(expectedSession) && coroutineContext[kotlinx.coroutines.Job]?.isActive == true) examLoading = false }
     }
-    val semesterGrades = termReports[semester]?.grades.orEmpty().map(::gradeUi)
+    val currentReport = termReports[semester]
+    val semesterGrades = remember(currentReport, session.token) { currentReport?.grades.orEmpty().map(::gradeUi) }
+    val overallGrades = remember(report, session.token) { report.grades.map(::gradeUi) }
+    val semesterIds = remember(terms) { terms.map { it.id } }
+    val semesterLabels = remember(terms) { terms.associate { it.id to it.name } }
+    val overallStats by produceState(
+        initialValue = com.tyust.course.ui.screen.OverallStatsUi("--", "--", 0, 0, 0, 0, 0), report
+    ) { value = withContext(Dispatchers.Default) { AcademicStudyBridge.stats(report) } }
     com.tyust.course.ui.system.ReportPageContent(report.grades.isNotEmpty() || semesterGrades.isNotEmpty() || exams.isNotEmpty())
     GradesScreen(currentTab = tab, onTabChange = { tab = it },
-        semesterGrades = semesterGrades, semesters = terms.map { it.id }, semesterLabels = terms.associate { it.id to it.name },
+        semesterGrades = semesterGrades, semesters = semesterIds, semesterLabels = semesterLabels,
         currentSemester = semester, onSemesterChange = { semester = it; error = "" },
-        semesterIsLoading = loading || (terms.isEmpty() && overallLoading), overallGrades = report.grades.map(::gradeUi),
-        overallStats = AcademicStudyBridge.stats(report), overallIsLoading = overallLoading,
+        semesterIsLoading = loading || (terms.isEmpty() && overallLoading), overallGrades = overallGrades,
+        overallStats = overallStats, overallIsLoading = overallLoading,
         examList = exams, examIsLoading = examLoading,
         onRefresh = { when (tab) { 2 -> { examsLoaded = false; examRevision++ }; 1 -> overallRevision++; else -> { termReports = termReports - semester; revision++; termRevision++ } } },
         semesterError = error.ifBlank { if (terms.isEmpty()) catalogError.ifBlank { overallError } else "" },

@@ -7,6 +7,7 @@ import org.json.JSONObject
 /** Private state always belongs to this service. School credentials are used only through a grant. */
 class ServicePluginSession(
     private val app: Context, val pkg: PluginPackage, private val accountScope: String,
+    private val requestConfirmation: ((String, String, String) -> Boolean)? = null,
     private val scopeStillActive: () -> Boolean = { true }
 ) {
     private val school = pkg.manifest.school
@@ -28,7 +29,7 @@ class ServicePluginSession(
         require(pkg.manifest.isService)
         ServicePluginContract.validateManifest(pkg.manifest)
         if (sharesAcademicSession) runCatching {
-            val access = PluginAcademicSession(app, pkg, { !closed && scopeStillActive() })
+            val access = PluginAcademicSession(app, pkg, { !closed && scopeStillActive() }).also { it.confirmUnknownRequest = requestConfirmation }
             access.existingGrant()?.let { adopt(access, it) }
         }
     }
@@ -43,18 +44,18 @@ class ServicePluginSession(
 
     fun academicAuthorizationDescription(): String {
         ensureScope(); check(sharesAcademicSession)
-        val access = PluginAcademicSession(app, pkg, { !closed && scopeStillActive() })
+        val access = PluginAcademicSession(app, pkg, { !closed && scopeStillActive() }).also { it.confirmUnknownRequest = requestConfirmation }
         val description = access.description()
         access.requireCredentials()
         sharedAccess = access; sharedGrant = ""
         return description
     }
     /** Called by the host only after the user confirms the displayed authorization. */
-    fun authorizeAcademicSession() {
+    fun authorizeAcademicSession(remember: Boolean = false) {
         ensureScope(); check(sharesAcademicSession)
         val access = checkNotNull(sharedAccess) { "请先确认共享教务登录的授权范围" }
         access.requireCredentials()
-        adopt(access, access.authorize().getString("grant"))
+        adopt(access, access.authorize(remember).getString("grant"))
     }
     private fun adopt(access: PluginAcademicSession, grant: String) {
         access.requireGrant(grant); access.requireCredentials()
@@ -83,6 +84,13 @@ class ServicePluginSession(
         }
     }
     suspend fun page(id: String, params: JSONObject = JSONObject()): JSONObject = invoke("service.page", JSONObject().put("pageId", id).put("params", params))
+    fun reusableAction(id: String): Boolean = sharedAccess?.reusableAction(id) != null
+    fun rememberedAction(id: String): Boolean = sharedAccess?.rememberedAction(id) == true
+    fun rememberAction(id: String) {
+        ensureScope(); val access = checkNotNull(sharedAccess)
+        access.requireGrant(sharedGrant)
+        access.rememberOperation(access.reusableAction(id) ?: throw PluginException(PluginErrorCode.PERMISSION_DENIED, "操作未获提供者审核"))
+    }
     suspend fun action(id: String, params: JSONObject, confirmed: Boolean): JSONObject = invoke("service.action", JSONObject().put("actionId", id).put("params", params), confirmed)
     fun requireActive() { ensureScope(); session.requireActive(); if (!authenticated) throw AcademicException(AcademicStatus.SESSION_EXPIRED, if (sharesAcademicSession) "请先授权使用本校教务登录" else "请先登录此服务") }
     suspend fun nativeResult(result: JSONObject): JSONObject {

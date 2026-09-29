@@ -246,6 +246,7 @@ class GlassLensAnchor internal constructor(
             val overlayChanged = overlay != null &&
                 (geometryChanged || uploadedOverlayVersion != overlayVersion || recordedOverlay == null)
             try {
+                val recordStarted = System.nanoTime()
                 val background = if (backgroundChanged) {
                     backgroundCaptureCount++
                     recordGlassLensSource("$tag-background", size, density, coords.size) { drawSource(coords) }
@@ -269,6 +270,7 @@ class GlassLensAnchor internal constructor(
                     recordedBackground?.let { drawContext.canvas.nativeCanvas.drawRenderNode(it) }
                     if (overlay != null) recordedOverlay?.let { drawContext.canvas.nativeCanvas.drawRenderNode(it) }
                 }
+                GlassLensCaptureObserver.onTiming?.invoke(tag, "record", System.nanoTime() - recordStarted)
                 val generation = ++uploadSequence
                 val queuedAt = System.nanoTime()
                 val recording = GlassLensCaptureFrame(generation, geometry, combined, queuedAt)
@@ -316,7 +318,7 @@ class GlassLensAnchor internal constructor(
                                 source.uploadSource(bitmap, generation) {
                                     GlassLensCaptureObserver.onTiming?.invoke(tag, "capture-to-upload", System.nanoTime() - queuedAt)
                                     mainHandler.post {
-                                        if (!disposed) sourceFrame = recording
+                                        if (!disposed && (sourceFrame?.generation ?: -1) < recording.generation) sourceFrame = recording
                                     }
                                 }
                             }

@@ -27,7 +27,10 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
     private val captureToken: ((HttpUrl, String, String, Int, String) -> Unit)? = null,
     private val sharedToken: ((HttpUrl) -> Pair<String, String>?)? = null,
     private val tokenSession: com.tyust.course.academic.AcademicSession = operation.session,
+    private val dataGuard: PluginDataGuard? = null,
+    private val sharedApproval: ((JSONObject) -> Unit)? = null,
     private val sharedRequest: ((HttpUrl, String, String, JSONObject?) -> Unit)? = null) {
+    private val cookiesForResponse: (HttpUrl) -> List<String> = { url -> cookies.loadForRequest(url).map { it.value } }
     private val policy = PluginNetworkPolicy(operation.manifest.network)
     private val client = OkHttpClient.Builder().cookieJar(cookies)
         .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
@@ -87,6 +90,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
         val charsetName = payload.optString("charset", "UTF-8")
         if (charsetName !in setOf("UTF-8", "GBK", "GB2312", "GB18030")) invalid("不支持的编码")
         val charset = Charset.forName(charsetName)
+        sharedApproval?.invoke(JSONObject(payload.toString()))
         val supplied = JSONObject((payload.optJSONObject("headers") ?: JSONObject()).toString())
         // Only the host's authorized shared-session path supplies this callback.
         sharedRequest?.invoke(url, method, purpose, form)
@@ -157,11 +161,13 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
             authScope?.requireAllowed(url, method)
             val rule = policy.requireAllowed(url, method, purpose, form, if (token != null && !academicToken) "X-Token" else null)
             sharedRequest?.invoke(url, method, purpose, form)
+            if (sharedRequest == null) dataGuard?.requireNetwork(url)
             if (sessionToken != null && sharedToken?.invoke(url) != sessionToken)
                 throw PluginException(PluginErrorCode.SESSION_EXPIRED, "教务令牌已改变，请重新发起请求")
             val userAgent = rule.optString("userAgent").ifBlank {
                 operation.manifest.json.optJSONObject("school")?.optString("userAgent").orEmpty()
             }.ifBlank { "ZhengfangAcademicPlugin/1" }
+            val requestSecrets = if (sharedRequest != null) cookiesForResponse(url) + listOfNotNull(sessionToken?.second) else emptyList()
             val builder = Request.Builder().url(url).header("User-Agent", userAgent)
             if (sameOriginReferer) builder.header("Referer", url.newBuilder().encodedPath("/").query(null).fragment(null).build().toString())
             supplied.keys().forEach { builder.header(it, supplied.getString(it)) }
@@ -178,6 +184,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
             if (purpose == "mutation") operation.markMutation()
             val call = transport.newCall(builder.build())
             operation.register(call)
+            dataGuard?.track(operation)
             try {
                 call.execute().use { response ->
                     operation.requireActive()
@@ -209,6 +216,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
                         url = next.newBuilder().fragment(null).build()
                         method = "GET"
                         form = null
+                        sharedApproval?.invoke(JSONObject(payload.toString()).put("url", url.toString()).put("method", "GET").apply { remove("form"); remove("body") })
                     } else {
                         val stream = response.body?.source()
                         stream?.request(PluginLimits.RESPONSE_BYTES.toLong() + 1)
@@ -222,6 +230,11 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
                             "base64" -> bytes.toByteString().base64()
                             else -> invalid("不支持的响应格式")
                         }
+                        if (sharedRequest != null) {
+                            val secrets = requestSecrets + cookiesForResponse(url) + listOfNotNull(sessionToken?.second)
+                            PluginSecretResponse.requireSafe(bytes, responseUrl = url.toString(), secrets = secrets)
+                            dataGuard?.mark()
+                        }
                         val headers = JSONObject()
                         captureToken?.invoke(url, method, purpose, response.code, bytes.toString(charset))
                         listOf("Content-Type", "Date", "Retry-After").forEach { name -> response.header(name)?.let { headers.put(name, it) } }
@@ -231,7 +244,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
                 }
             } catch (e: IOException) {
                 throw operation.failure(PluginErrorCode.NETWORK_RETRYABLE, "网络请求中断")
-            } finally { operation.unregister(call) }
+            } finally { operation.unregister(call); dataGuard?.untrack(operation) }
         }
     }
 
