@@ -60,6 +60,7 @@ private fun AcademicGradesContent(school: SchoolConfig, account: String, provide
     var error by remember { mutableStateOf("") }
     var overallError by remember { mutableStateOf("") }
     var catalogError by remember { mutableStateOf("") }
+    var catalogLoading by remember { mutableStateOf(false) }
     var revision by remember { mutableIntStateOf(0) }
     var overallRevision by remember { mutableIntStateOf(0) }
     var termRevision by remember { mutableIntStateOf(0) }
@@ -98,7 +99,7 @@ private fun AcademicGradesContent(school: SchoolConfig, account: String, provide
     LaunchedEffect(revision, session.token) {
         if (0 !in supportedTabs) { loading = false; return@LaunchedEffect }
         if (catalog != null && revision == 0) return@LaunchedEffect
-        catalogError = ""
+        catalogError = ""; catalogLoading = true
         try {
             if (com.tyust.course.academic.plugin.AcademicProviderRegistry.hasCapability(school, "study.terms")) {
                 val loaded = withContext(Dispatchers.IO) { AcademicStudyBridge.reader(school, account, expectedSession).catalog() }
@@ -106,6 +107,7 @@ private fun AcademicGradesContent(school: SchoolConfig, account: String, provide
             }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { if (sessions.isCurrent(expectedSession)) catalogError = loadError(e) }
+        finally { if (sessions.isCurrent(expectedSession) && coroutineContext[kotlinx.coroutines.Job]?.isActive == true) catalogLoading = false }
     }
     LaunchedEffect(overallRevision, session.token) {
         if (0 !in supportedTabs || (reportLoaded && overallRevision == 0)) return@LaunchedEffect
@@ -165,7 +167,12 @@ private fun AcademicGradesContent(school: SchoolConfig, account: String, provide
         onRefresh = { when (tab) { 2 -> { examsLoaded = false; examRevision++ }; 1 -> overallRevision++; else -> { termReports = termReports - semester; revision++; termRevision++ } } },
         semesterError = error.ifBlank { if (terms.isEmpty()) catalogError.ifBlank { overallError } else "" },
         overallError = overallError, examError = examError,
-        onExportGrades = { exportAcademicGrades(context, it) }, supportedTabs = supportedTabs)
+        onExportGrades = { exportAcademicGrades(context, it) }, supportedTabs = supportedTabs,
+        semestersLoading = catalogLoading, semestersError = catalogError,
+        onRefreshSemesters = {
+            revision++
+            if (!com.tyust.course.academic.plugin.AcademicProviderRegistry.hasCapability(school, "study.terms")) overallRevision++
+        })
 }
 
 private fun exportAcademicGrades(context: Context, grades: List<GradeItemUi>) {

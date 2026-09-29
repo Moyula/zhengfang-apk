@@ -167,7 +167,10 @@ fun GradesScreen(
     overallError: String = "",
     examError: String = "",
     supportedTabs: Set<Int> = setOf(0, 1, 2),
-    semesterLabels: Map<String, String> = emptyMap()
+    semesterLabels: Map<String, String> = emptyMap(),
+    semestersLoading: Boolean = false,
+    semestersError: String = "",
+    onRefreshSemesters: (() -> Unit)? = null
 ) {
     val availableTabs = listOf(0, 1, 2).filter { it in supportedTabs }.ifEmpty { listOf(0, 1, 2) }
     val tabTitles = availableTabs.map { listOf("学期", "总体", "考试")[it] + if (it in supportedTabs) "" else " · 未适配" }
@@ -280,7 +283,10 @@ fun GradesScreen(
                         error = semesterError,
                         listState = semesterListState,
                         topInset = contentTopInset,
-                        bottomInset = contentBottomInset
+                        bottomInset = contentBottomInset,
+                        semestersLoading = semestersLoading,
+                        semestersError = semestersError,
+                        onRefreshSemesters = onRefreshSemesters
                     )
 
                     1 -> OverallGradesContent(
@@ -413,7 +419,10 @@ private fun SemesterGradesContent(
     error: String,
     listState: LazyListState,
     topInset: Dp,
-    bottomInset: Dp
+    bottomInset: Dp,
+    semestersLoading: Boolean,
+    semestersError: String,
+    onRefreshSemesters: (() -> Unit)?
 ) {
     val totalCredits = remember(grades) { grades.sumOf { it.credits.toDoubleOrNull() ?: 0.0 } }
     val averageGpa = remember(grades) { semesterAverageGpa(grades) }
@@ -435,7 +444,10 @@ private fun SemesterGradesContent(
                 SemesterSelector(
                     semesters = semesters, semesterLabels = semesterLabels,
                     currentSemester = currentSemester,
-                    onSemesterChange = onSemesterChange
+                    onSemesterChange = onSemesterChange,
+                    isLoading = semestersLoading,
+                    error = semestersError,
+                    onRefresh = onRefreshSemesters
                 )
 
                 when {
@@ -490,21 +502,34 @@ private fun GradeRefreshStatus(isLoading: Boolean, error: String) {
 }
 
 @Composable
-private fun SemesterSelector(
+internal fun SemesterSelector(
     semesters: List<String>,
     semesterLabels: Map<String, String>,
     currentSemester: String,
-    onSemesterChange: (String) -> Unit
+    onSemesterChange: (String) -> Unit,
+    isLoading: Boolean = false,
+    error: String = "",
+    onRefresh: (() -> Unit)? = null
 ) {
     val selectedIndex = semesters.indexOf(currentSemester).takeIf { it >= 0 }
-    SystemPicker(
-        options = semesters.map { semesterLabels[it] ?: it },
-        selectedIndex = selectedIndex,
-        onSelect = { index -> onSemesterChange(semesters[index]) },
-        modifier = Modifier.fillMaxWidth(),
-        label = "学期",
-        placeholder = "选择学期"
-    )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SystemPicker(
+            options = semesters.map { semesterLabels[it] ?: it },
+            selectedIndex = selectedIndex,
+            onSelect = { index -> semesters.getOrNull(index)?.let(onSemesterChange) },
+            modifier = Modifier.fillMaxWidth(),
+            label = "学期",
+            placeholder = if (isLoading) "正在加载学期…" else "选择学期",
+            actionLabel = if (onRefresh != null && !isLoading) "刷新学期列表" else null,
+            onAction = onRefresh.takeUnless { isLoading }
+        )
+        when {
+            isLoading -> Text("正在加载学期列表…", style = MaterialTheme.typography.bodySmall)
+            error.isNotBlank() -> Text("学期列表加载失败：$error", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error)
+            semesters.isEmpty() -> Text("学校暂未提供可选学期，请刷新学期列表重试。", style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
 @Composable

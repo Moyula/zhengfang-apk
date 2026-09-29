@@ -30,13 +30,16 @@ data class GrabCapabilities(
         // This shipped package advertises the selection group but select/drop call noMutation.
         // Restrict its reviewed digest, not every Chengfang school or future replacement plugin.
         internal const val UNVERIFIED_CHENGFANG = "f4bdd3e5e3e6fe30ba8a00f3892ad9fd65a56e9e32f50876d5cc45102d46ec1b"
+        // CLI whitespace minification changes the archive digest without implementing noMutation.
+        private val unverifiedChengfangDigests = setOf(UNVERIFIED_CHENGFANG,
+            "ba27c7c6e8e47322f1386bfe7c907520411903f975f5f88ad6fddb8fc9c17d00")
         internal val selectionOperations = setOf("selection.catalog", "selection.courses", "selection.sections", "selection.select")
 
         internal fun evaluate(system: AcademicSystem?, plugin: Boolean, operations: Set<String>,
             submissionDigest: String = "", providerKey: String = "", unavailableReason: String = ""): GrabCapabilities {
             val reason = when {
                 unavailableReason.isNotBlank() -> unavailableReason
-                submissionDigest == UNVERIFIED_CHENGFANG -> "当前乘方适配的选课提交尚未支持，请使用学校网页；查询功能仍可使用"
+                submissionDigest in unverifiedChengfangDigests -> "当前乘方适配的选课提交尚未支持，请使用学校网页；查询功能仍可使用"
                 plugin && !operations.containsAll(selectionOperations) -> "当前教务插件未提供完整的选课查询与提交能力"
                 !plugin && (system == null || system == AcademicSystem.AUTO) -> "请先选择并启用本校教务适配"
                 else -> ""
