@@ -333,6 +333,10 @@ jobs:
         run: rm -f app/release-key.jks
 
   sync-to-gitee:
+    timeout-minutes: 15
+    concurrency:
+      group: gitee-${{ needs.build.outputs.release_tag }}
+      cancel-in-progress: false
     if: github.event_name != 'workflow_dispatch' || (!inputs.test_only && !inputs.skip_gitee)
     needs: build
     runs-on: ubuntu-latest
@@ -360,151 +364,9 @@ jobs:
           RELEASE_NOTES: ${{ needs.build.outputs.release_notes }}
           TAG: ${{ needs.build.outputs.release_tag }}
         run: |
-          set -e
-
-          APK_FILE=$(find ./apk -name "*.apk" | head -1)
-
-          if [ -z "$APK_FILE" ]; then
-            echo "ERROR: APK file not found in artifact"
-            exit 1
-          fi
-
-          if [ -z "${RELEASE_NOTES:-}" ]; then
-            echo "ERROR: 上游未传出更新日志，中止同步（不写空文案覆盖线上 version.json）"
-            exit 1
-          fi
-
-          # 从构建产物 version.properties 读取真实版本号。
-          # 与 build job 用同一种锚定写法：文件里有注释行，子串 grep 会把注释
-          # 一起收进来，而 cut 对不含 '=' 的行会吐回整行。
-          VERSION_CODE=$(sed -n 's/^VERSION_CODE=[[:space:]]*//p' ./version/version.properties | tr -d '[:space:]')
-          VERSION_NAME=$(sed -n 's/^VERSION_NAME=[[:space:]]*//p' ./version/version.properties | tr -d '[:space:]')
-
-          if [ -z "$VERSION_CODE" ] || [ -z "$VERSION_NAME" ]; then
-            echo "ERROR: 无法从产物解析版本号（VC='${VERSION_CODE}' VN='${VERSION_NAME}'）"
-            exit 1
-          fi
-
-          echo "=== Syncing to Gitee ==="
-          echo "TAG: $TAG"
-          echo "VERSION_NAME: $VERSION_NAME"
-          echo "VERSION_CODE: $VERSION_CODE"
-          echo "APK: $APK_FILE ($(du -h "$APK_FILE" | cut -f1))"
-
-          # 1. 创建或复用 Gitee Release
-          echo ""
-          echo "--- Step 1: Gitee Release ---"
-
-          # 先检查是否已存在
-          EXISTING_RELEASE=$(curl -s "https://gitee.com/api/v5/repos/znj12345/zhengfang/releases?access_token=${GITEE_TOKEN}&per_page=50" | \
-            jq -r "[.[] | select(.tag_name==\"${TAG}\")] | .[0].id // empty")
-
-          if [ -n "$EXISTING_RELEASE" ]; then
-            echo "Release already exists (ID: $EXISTING_RELEASE), will upload APK to it"
-            RELEASE_ID="$EXISTING_RELEASE"
-          else
-            echo "Creating new release..."
-            RELEASE_RESPONSE=$(curl -s -X POST \
-              "https://gitee.com/api/v5/repos/znj12345/zhengfang/releases" \
-              -F "access_token=${GITEE_TOKEN}" \
-              -F "tag_name=${TAG}" \
-              -F "name=Release ${TAG}" \
-              -F "target_commitish=main" \
-              -F "body=${RELEASE_NOTES}" \
-              -F "prerelease=false")
-            RELEASE_ID=$(echo "$RELEASE_RESPONSE" | jq -r '.id // empty')
-            if [ -z "$RELEASE_ID" ]; then
-              echo "WARNING: Failed to create release:"
-              echo "$RELEASE_RESPONSE" | jq .
-            else
-              echo "Release created (ID: $RELEASE_ID)"
-            fi
-          fi
-
-          # 2. 上传 APK 到 Release
-          echo ""
-          echo "--- Step 2: Upload APK ---"
-
-          if [ -n "$RELEASE_ID" ]; then
-            # 检查是否已有同名附件
-            EXISTING_ASSET=$(curl -s "https://gitee.com/api/v5/repos/znj12345/zhengfang/releases/${RELEASE_ID}/attach_files?access_token=${GITEE_TOKEN}" | \
-              jq -r '[.[] | select(.name=="app-release.apk")] | .[0].id // empty')
-
-            if [ -n "$EXISTING_ASSET" ]; then
-              echo "APK asset already exists (ID: $EXISTING_ASSET), skipping upload"
-            else
-              echo "Uploading APK..."
-              UPLOAD_RESPONSE=$(curl -s -X POST \
-                "https://gitee.com/api/v5/repos/znj12345/zhengfang/releases/${RELEASE_ID}/attach_files" \
-                -F "access_token=${GITEE_TOKEN}" \
-                -F "file=@${APK_FILE}")
-              UPLOAD_URL=$(echo "$UPLOAD_RESPONSE" | jq -r '.browser_download_url // empty')
-              if [ -n "$UPLOAD_URL" ]; then
-                echo "APK uploaded: $UPLOAD_URL"
-              else
-                echo "WARNING: Upload response:"
-                echo "$UPLOAD_RESPONSE" | jq .
-              fi
-            fi
-          else
-            echo "ERROR: No release ID, cannot upload APK"
-          fi
-
-          # 3. 更新 version.json
-          echo ""
-          echo "--- Step 3: Update version.json ---"
-
-          DOWNLOAD_URL="https://gitee.com/znj12345/zhengfang/releases/download/${TAG}/app-release.apk"
-
-          VERSION_JSON=$(jq -n \
-            --argjson vc "$VERSION_CODE" \
-            --arg vn "$VERSION_NAME" \
-            --arg rn "${RELEASE_NOTES}" \
-            --arg du "$DOWNLOAD_URL" \
-            '{
-              versionCode: ($vc | tonumber),
-              versionName: $vn,
-              releaseNotes: $rn,
-              downloadUrl: $du,
-              forceUpdate: true
-            }')
-
-          echo "version.json content:"
-          echo "$VERSION_JSON" | jq .
-
-          VERSION_B64=$(echo -n "$VERSION_JSON" | base64 -w 0)
-
-          # 检查是否已存在
-          EXISTING_FILE=$(curl -s "https://gitee.com/api/v5/repos/znj12345/zhengfang/contents/version.json?access_token=${GITEE_TOKEN}" 2>/dev/null)
-
-          if echo "$EXISTING_FILE" | jq -e '.sha' > /dev/null 2>&1; then
-            OLD_SHA=$(echo "$EXISTING_FILE" | jq -r '.sha')
-            echo "Updating existing version.json (sha: $OLD_SHA)"
-            RESULT=$(curl -s -X PUT \
-              "https://gitee.com/api/v5/repos/znj12345/zhengfang/contents/version.json" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n \
-                --arg token "$GITEE_TOKEN" \
-                --arg msg "release: ${TAG}" \
-                --arg content "$VERSION_B64" \
-                --arg sha "$OLD_SHA" \
-                '{access_token: $token, message: $msg, content: $content, sha: $sha}')")
-            echo "Result: $(echo "$RESULT" | jq -r '.content.name // .message // "updated"')"
-          else
-            echo "Creating new version.json"
-            RESULT=$(curl -s -X POST \
-              "https://gitee.com/api/v5/repos/znj12345/zhengfang/contents/version.json" \
-              -H "Content-Type: application/json" \
-              -d "$(jq -n \
-                --arg token "$GITEE_TOKEN" \
-                --arg msg "release: ${TAG}" \
-                --arg content "$VERSION_B64" \
-                '{access_token: $token, message: $msg, content: $content, branch: "main"}')")
-            echo "Result: $(echo "$RESULT" | jq -r '.content.name // .message // "created"')"
-          fi
-
-          echo ""
-          echo "=== Gitee sync complete ==="
+          printf '%s' "$RELEASE_NOTES" > release-notes.txt
+          python3 -m unittest discover -s scripts/tests -p 'test_sync_gitee_release.py'
+          python3 scripts/sync_gitee_release.py --tag "$TAG" --apk apk/app-release.apk --notes-file release-notes.txt
 
       - name: Verify Delivery and Publish Announcement
         env:
