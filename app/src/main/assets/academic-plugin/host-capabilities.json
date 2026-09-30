@@ -1,5 +1,53 @@
 [
   {
+    "name": "ui.viewport",
+    "version": 1,
+    "permission": "pages",
+    "input": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "widthDp": {
+          "type": "number",
+          "minimum": 0
+        },
+        "heightDp": {
+          "type": "number",
+          "minimum": 0
+        },
+        "widthClass": {
+          "enum": [
+            "compact",
+            "medium",
+            "expanded"
+          ]
+        },
+        "fontScale": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": [
+        "widthDp",
+        "heightDp",
+        "widthClass",
+        "fontScale"
+      ],
+      "additionalProperties": false
+    },
+    "cancellable": true,
+    "userGesture": false,
+    "limits": {
+      "maxPerFlow": 32
+    },
+    "web": false
+  },
+  {
     "name": "pages.register",
     "version": 1,
     "permission": "pages",
@@ -49,7 +97,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "pages.open",
@@ -76,7 +125,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "pages.close",
@@ -93,7 +143,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "pages.unregister",
@@ -117,7 +168,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "services.discover",
@@ -195,7 +247,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "services.call",
@@ -250,7 +303,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "workflow.prepare",
@@ -326,7 +380,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "workflow.step",
@@ -354,7 +409,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "workflow.reconcile",
@@ -382,7 +438,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "workflow.cancel",
@@ -410,7 +467,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "workflow.list",
@@ -433,7 +491,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "academic.study.snapshot",
@@ -457,7 +516,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "academic.study.refresh",
@@ -481,7 +541,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "academic.schedule.preview",
@@ -514,7 +575,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "academic.schedule.confirm",
@@ -542,7 +604,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "accounts.select",
@@ -580,7 +643,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "accounts.remove",
@@ -611,7 +675,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "privacy.status",
@@ -628,7 +693,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "privacy.revoke",
@@ -645,7 +711,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "academic.session.authorize",
@@ -685,7 +752,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "academic.session.request",
@@ -824,7 +892,8 @@
     "limits": {
       "maxPerFlow": 32,
       "responseBytes": 5242880
-    }
+    },
+    "web": false
   },
   {
     "name": "academic.session.revoke",
@@ -841,7 +910,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "network.request",
@@ -1249,7 +1319,8 @@
     "limits": {
       "maxPerFlow": 32,
       "responseBytes": 5242880
-    }
+    },
+    "web": false
   },
   {
     "name": "storage.get",
@@ -1275,7 +1346,8 @@
     "limits": {
       "maxPerFlow": 32,
       "bytes": 262144
-    }
+    },
+    "web": false
   },
   {
     "name": "storage.set",
@@ -1303,7 +1375,8 @@
     "limits": {
       "maxPerFlow": 32,
       "bytes": 262144
-    }
+    },
+    "web": false
   },
   {
     "name": "storage.remove",
@@ -1328,7 +1401,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "auth.prompt",
@@ -1415,7 +1489,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "credentials.find",
@@ -1440,7 +1515,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "credentials.remove",
@@ -1465,7 +1541,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "session.save",
@@ -1490,7 +1567,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "session.restore",
@@ -1526,7 +1604,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "session.clear",
@@ -1551,7 +1630,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "files.pick",
@@ -1610,7 +1690,8 @@
     "limits": {
       "maxPerFlow": 32,
       "bytes": 16777216
-    }
+    },
+    "web": true
   },
   {
     "name": "files.create",
@@ -1668,7 +1749,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "files.read",
@@ -1726,7 +1808,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "files.write",
@@ -1790,7 +1873,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "files.remove",
@@ -1815,7 +1899,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "files.download",
@@ -2239,7 +2324,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "files.upload",
@@ -2666,7 +2752,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "files.open",
@@ -2691,7 +2778,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "files.share",
@@ -2716,7 +2804,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "device.clipboard.read",
@@ -2745,7 +2834,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "device.clipboard.write",
@@ -2769,7 +2859,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "device.haptic",
@@ -2786,7 +2877,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "tasks.schedule",
@@ -2835,7 +2927,8 @@
     "limits": {
       "maxPerFlow": 32,
       "pending": 16
-    }
+    },
+    "web": false
   },
   {
     "name": "tasks.cancel",
@@ -2860,7 +2953,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "tasks.list",
@@ -2911,7 +3005,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "notifications.post",
@@ -2946,7 +3041,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "navigation.page",
@@ -2974,7 +3070,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "navigation.back",
@@ -2991,7 +3088,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "navigation.url",
@@ -3015,7 +3113,8 @@
     "userGesture": true,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": true
   },
   {
     "name": "runtime.cancel",
@@ -3044,7 +3143,8 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   },
   {
     "name": "data.query",
@@ -3092,6 +3192,7 @@
     "userGesture": false,
     "limits": {
       "maxPerFlow": 32
-    }
+    },
+    "web": false
   }
 ]

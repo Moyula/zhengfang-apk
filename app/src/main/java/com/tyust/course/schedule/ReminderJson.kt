@@ -8,10 +8,11 @@ internal object ReminderJson {
         put("id", value.id); put("name", value.name); put("teacher", value.teacher); put("location", value.location)
         put("day", value.day); put("start", value.startPeriod); put("end", value.endPeriod)
         put("weeks", value.weeks); put("custom", value.custom)
+        if (value.details.isNotEmpty()) put("details", ScheduleDetails.json(value.details))
     }
     fun course(value: JSONObject) = ScheduleCourseRecord(value.getString("id"), value.getString("name"),
         value.optString("teacher"), value.optString("location"), value.getInt("day"), value.getInt("start"),
-        value.getInt("end"), value.getString("weeks"), value.optBoolean("custom"))
+        value.getInt("end"), value.getString("weeks"), value.optBoolean("custom"), ScheduleDetails.parse(value.optJSONArray("details"), ScheduleWeeks.parse(value.getString("weeks")).weeks))
 
     fun reminder(value: CourseReminder) = JSONObject().apply {
         put("account", value.key.account); put("term", value.key.term); put("course", course(value.course))

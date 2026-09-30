@@ -17,25 +17,25 @@
       "id": "org.zf.protocol.zf",
       "type": "zf",
       "asset": "zf.eduplugin",
-      "sha256": "63ab8817702e45b9107a2cd71cb5e1ef9ccd9a5037caeaee220c7a504bea90b2"
+      "sha256": "c3aec8d5915461977d23bc37c1cb6b8a9d2543547fd3c6cb88eed0211c968238"
     },
     {
       "id": "org.zf.protocol.zf-old",
       "type": "zf_old",
       "asset": "zf_old.eduplugin",
-      "sha256": "6e53d148f13135145d2331952d98931f969862c921824049ed0645ebddae26ba"
+      "sha256": "9c4a59ba678ee587178a9e49360477e729d74caa9255bb5374160135457ae778"
     },
     {
       "id": "org.zf.protocol.qz",
       "type": "qz",
       "asset": "qz.eduplugin",
-      "sha256": "8838eac5994f14664614803cd6062f15834c6c68886e646f65b747447d48ccf7"
+      "sha256": "c01fae881e8dad03eced70090942a41b4811b73cda97f941e9fe5ddae48f93bf"
     },
     {
       "id": "org.zf.protocol.qz-old",
       "type": "qz_old",
       "asset": "qz_old.eduplugin",
-      "sha256": "801714f4e61b4d8fe4c81b93f7fbefaf0a39d61d122ccfc851226ea478c4dd27"
+      "sha256": "8fda43e8b242e66a624d94ab6d4a75c8951d39f239e1a43e35fd2f9e4e0a2642"
     }
   ]
 }

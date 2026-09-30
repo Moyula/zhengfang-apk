@@ -194,9 +194,10 @@ data class ScheduleCourseUi(
     ),
     val hasConflict: Boolean = false,
     val isCurrent: Boolean = false,
-    val isNext: Boolean = false
+    val isNext: Boolean = false,
+    val details: List<com.tyust.course.schedule.ScheduleDetail> = emptyList()
 ) {
-    fun record() = com.tyust.course.schedule.ScheduleCourseRecord(id, name, teacher, location, day, startPeriod, endPeriod, weeks, isCustom)
+    fun record() = com.tyust.course.schedule.ScheduleCourseRecord(id, name, teacher, location, day, startPeriod, endPeriod, weeks, isCustom, details)
 }
 
 data class PeriodTimeUi(val period: Int, val startTime: String, val endTime: String)

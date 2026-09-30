@@ -49,6 +49,7 @@ class PluginAcademicAdapter(
         if (needsShared != (shared != null)) throw AcademicException(AcademicStatus.UNSUPPORTED, "共享校园服务必须通过宿主授权入口调用")
         if (method !in pinned.manifest.capabilities)
             return (base as? PluginAcademicAdapter)?.invoke(method, args, confirmed) ?: unsupported(method)
+        val queuedAt = android.os.SystemClock.elapsedRealtime()
         return session.withProtocolLock {
         val reusableAction = if (!confirmed && method == "service.action" && shared?.rememberedAction(args.optString("actionId")) == true) args.getString("actionId") else null
         val effectiveConfirmation = confirmed || reusableAction != null
@@ -56,6 +57,7 @@ class PluginAcademicAdapter(
         val op = PluginOperation(session, pinned.manifest, method, development = !pinned.official && !pinned.bundled, confirmed = effectiveConfirmation,
             actionId = if (method == "service.action") args.getString("actionId") else null,
             packageDigest = pinned.digest, scopeStillActive = { shared?.requireGrant(grant); scopeStillActive() })
+        PluginTrace.stage(op, "protocol_lock", android.os.SystemClock.elapsedRealtime() - queuedAt)
         val tokenCapture = if (method.startsWith("auth.") && pinned.manifest.isAcademic && pinned.manifest.json.has("academicSessionToken"))
             PluginAcademicTokenCapture(op, pinned) else null
         val host = PluginHost(op, storageRoot, shared?.cookies(grant) ?: session.cookies,
@@ -77,9 +79,12 @@ class PluginAcademicAdapter(
         val lease = PluginVersionLeases.acquire(pinned.manifest.id)
         try {
             shared?.track(grant, op)
+            PluginTrace.stage(op, "sandbox")
             val result = PluginSandboxClient(app).execute(pinned.source, args, op, host)
             op.requireActive()
+            PluginTrace.stage(op, "response_validation")
             schema.response(method, result).also { data ->
+                if (method == "study.schedule") PluginJson.objects(data.getJSONArray("entries")).forEach { com.tyust.course.schedule.ScheduleDetails.fromEntry(it) }
                 tokenCapture?.publish(data)
                 if (method == "service.page") {
                     if (data.getString("pageId") != args.getString("pageId")) throw PluginException(PluginErrorCode.VALIDATION_FAILED, "服务返回了其他页面")
@@ -168,7 +173,7 @@ class PluginAcademicAdapter(
         PluginJson.objects(data.getJSONArray("entries")).map { item ->
             if (item.getInt("endPeriod") < item.getInt("startPeriod")) throw AcademicException(AcademicStatus.PAGE_CHANGED, "课表节次顺序无效")
             AcademicScheduleEntry(item.getString("name"), item.optString("teacher"), item.optString("location"), item.getInt("day"),
-                item.getInt("startPeriod"), item.getInt("endPeriod"), (0 until item.getJSONArray("weeks").length()).joinToString(",") { item.getJSONArray("weeks").getInt(it).toString() } + "周", item.getString("id"))
+                item.getInt("startPeriod"), item.getInt("endPeriod"), (0 until item.getJSONArray("weeks").length()).joinToString(",") { item.getJSONArray("weeks").getInt(it).toString() } + "周", item.getString("id"), com.tyust.course.schedule.ScheduleDetails.fromEntry(item))
         }
     } else study?.schedule(term) ?: unsupported("study.schedule")
     override suspend fun grades(term: AcademicTerm?): AcademicGradeReport = if (has("study.grades")) {

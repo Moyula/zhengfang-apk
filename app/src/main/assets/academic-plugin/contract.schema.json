@@ -235,6 +235,42 @@
         }
       ]
     },
+    "ScheduleDetail": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "weeks": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          },
+          "maxItems": 25,
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "value"
+      ],
+      "additionalProperties": false
+    },
     "ScheduleEntry": {
       "type": "object",
       "properties": {
@@ -253,6 +289,13 @@
         },
         "location": {
           "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScheduleDetail"
+          },
+          "maxItems": 32
         },
         "day": {
           "type": "integer",

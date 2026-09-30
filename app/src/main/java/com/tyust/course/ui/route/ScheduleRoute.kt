@@ -231,7 +231,7 @@ fun ScheduleRoute(isActive: Boolean = true) {
     fun parseSchedule(json: String): List<ScheduleCourseUi>? = ScheduleJson.parse(json)?.map { entry ->
         val c = entry.course
         ScheduleCourseUi(c.name, c.teacher, c.location, c.day, c.startPeriod, c.endPeriod, c.weeks,
-            courseColors[ScheduleIdentity.colorIndex(c.id, courseColors.size)], sourceId = entry.sourceId, id = c.id)
+            courseColors[ScheduleIdentity.colorIndex(c.id, courseColors.size)], sourceId = entry.sourceId, id = c.id, details = c.details)
     }
 
     fun reloadCustomCourses(currentList: List<ScheduleCourseUi>): List<ScheduleCourseUi> {
@@ -313,7 +313,7 @@ fun ScheduleRoute(isActive: Boolean = true) {
                 catch (e: Exception) {
                     if (requests.isCurrent(ticket) && studyGeneration == generation) {
                         val message = e.message ?: "课表同步失败，请重试"
-                        if (!retained) loadError = message
+                        loadError = if (retained) "同步失败，已保留本地课表：$message" else message
                         if (manual) {
                             if (e is com.tyust.course.academic.AcademicException &&
                                 e.status == com.tyust.course.academic.AcademicStatus.SESSION_EXPIRED)
@@ -565,7 +565,7 @@ fun ScheduleRoute(isActive: Boolean = true) {
     val detailTerm = notificationCourse?.key?.term ?: resolvedTermId
     val selectedDetail = courses.firstOrNull { it.id == detailId && detailTerm == resolvedTermId } ?: notificationCourse?.course?.let {
         ScheduleCourseUi(it.name, it.teacher, it.location, it.day, it.startPeriod, it.endPeriod, it.weeks,
-            courseColors[ScheduleIdentity.colorIndex(it.id, courseColors.size)], it.custom, if (it.custom) it.id.removePrefix("custom:") else "", id = it.id)
+            courseColors[ScheduleIdentity.colorIndex(it.id, courseColors.size)], it.custom, if (it.custom) it.id.removePrefix("custom:") else "", id = it.id, details = it.details)
     }
     courses.firstOrNull { it.id == quickCourseId }?.let { course ->
         val reminderKey = CourseReminderKey(routeAccountKey, resolvedTermId, course.id)
@@ -591,7 +591,7 @@ fun ScheduleRoute(isActive: Boolean = true) {
     selectedDetail?.let { course ->
         com.tyust.course.ui.screen.ScheduleCourseSheet(course, routeAccountKey, detailTerm, if (detailTerm == resolvedTermId) courses else listOf(course),
             sourceCenterX = detailSourceBounds?.center?.x,
-            sourceBounds = detailSourceBounds,
+            sourceBounds = detailSourceBounds, currentWeek = currentWeek,
             onDismiss = { detailId = null; detailSourceBounds = null; notificationCourseJson = null; focusRegistry.restore(course.id) },
             onEdit = { editingId = course.customId },
             onConfigureTime = { settingsTermOverride = detailTerm; showSettingsDialog = true },

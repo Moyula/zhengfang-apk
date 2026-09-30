@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -159,6 +159,9 @@ fun ScheduleScreen(
                         onWeekChange, onDayChange, onCourseClick, onCourseLongClick, onSettingsClick,
                         onShown = { week, day, scroll -> shownWeek = week; shownDay = day; activeScroll = scroll },
                         onScroll = { if (mode) dayOffset = it else weekOffset = it })
+                }
+                if (errorMessage.isNotBlank()) Surface(Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp, vertical = 12.dp), shape = MaterialTheme.shapes.medium) {
+                    Column(Modifier.padding(12.dp)) { Text(errorMessage, style = MaterialTheme.typography.bodySmall); TextButton(onClick = onRetry, enabled = !isLoading) { Text("重新同步") } }
                 }
             }
         }
