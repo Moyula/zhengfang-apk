@@ -86,7 +86,10 @@ class PluginCenterActivity : ComponentActivity() {
         var catalog by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
         var staged by remember { mutableStateOf<List<PluginPackage>>(emptyList()) }
         var pending by remember { mutableStateOf<PluginPackage?>(null) }
-        var selected by remember { mutableStateOf<PluginPackage?>(null) }
+        val packageSaver = remember { androidx.compose.runtime.saveable.Saver<PluginPackage?, String>(
+            save = { it?.let { p -> p.manifest.id + "|" + p.digest } },
+            restore = { value -> AcademicProviderRegistry.packages().active(value.substringBefore('|'))?.takeIf { it.digest == value.substringAfter('|') } }) }
+        var selected by rememberSaveable(stateSaver = packageSaver) { mutableStateOf<PluginPackage?>(null) }
         var uninstall by remember { mutableStateOf<PluginPackage?>(null) }
         var installedView by rememberSaveable { mutableStateOf(false) }
         var chooseProvider by remember { mutableStateOf(false) }
@@ -98,6 +101,7 @@ class PluginCenterActivity : ComponentActivity() {
         var catalogJob by remember { mutableStateOf<Job?>(null) }
         var installingId by remember { mutableStateOf<String?>(null) }
         var query by rememberSaveable { mutableStateOf("") }
+        var type by rememberSaveable { mutableStateOf(if (fromLogin) PluginDiscovery.Type.ACADEMIC else PluginDiscovery.Type.ALL) }
         var onlySchool by rememberSaveable { mutableStateOf(false) }
         var message by remember { mutableStateOf("") }
         val catalogClient = remember(catalogGeneration) { AcademicProviderRegistry.catalog() }
@@ -208,8 +212,8 @@ class PluginCenterActivity : ComponentActivity() {
         }
 
         val schools = remember(generation) { UserManager.getInstance().supportedSchools.toList() }
-        val discovered = remember(catalog, school, schools, query, onlySchool) {
-            PluginDiscovery.filter(catalog, school, query, onlySchool, schools)
+        val discovered = remember(catalog, school, schools, query, onlySchool, type) {
+            PluginDiscovery.filter(catalog, school, query, onlySchool, schools, type)
         }
         val installedEntries = remember(packages, generation) {
             packages.map { pkg ->
@@ -219,14 +223,18 @@ class PluginCenterActivity : ComponentActivity() {
                 }
             }
         }
-        val installed = remember(installedEntries, school, schools, query, onlySchool) {
-            PluginDiscovery.filter(installedEntries, school, query, onlySchool, schools)
+        val installed = remember(installedEntries, school, schools, query, onlySchool, type) {
+            PluginDiscovery.filter(installedEntries, school, query, onlySchool, schools, type)
         }
         val byId = remember(packages) { packages.associateBy { it.manifest.id } }
         val discoveryScroll = rememberLazyListState()
         val installedScroll = rememberLazyListState()
         val listState = if (installedView) installedScroll else discoveryScroll
-        LaunchedEffect(query, onlySchool, targetSchoolId, installedView) { listState.scrollToItem(0) }
+        var previousFilter by rememberSaveable { mutableStateOf(listOf(query, onlySchool.toString(), targetSchoolId.orEmpty(), type.name).joinToString("|")) }
+        LaunchedEffect(query, onlySchool, targetSchoolId, type) {
+            val filter = listOf(query, onlySchool.toString(), targetSchoolId.orEmpty(), type.name).joinToString("|")
+            if (filter != previousFilter) { discoveryScroll.scrollToItem(0); installedScroll.scrollToItem(0); previousFilter = filter }
+        }
 
         GlassPageScaffold(title = "插件中心", subtitle = "学校教务与校园服务", onBack = { finish() }, actions = {
             SystemIconButton(Icons.Outlined.MoreHoriz, "更多", { menu = true })
@@ -243,10 +251,13 @@ class PluginCenterActivity : ComponentActivity() {
                 DropdownMenuItem(text = { Text("开发文档与交流群") }, onClick = { menu = false; web("/developers") })
             }
         }) { padding ->
-            Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) {
+            Column(Modifier.fillMaxSize().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = 840.dp).padding(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding())) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     LiquidSegmentedControl(listOf("发现", "已安装"), if (installedView) 1 else 0,
                         { installedView = it == 1 }, Modifier.fillMaxWidth().testTag("plugin-tabs"), height = 44.dp)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        PluginDiscovery.Type.entries.forEach { option -> FilterChip(selected = type == option, onClick = { type = option }, label = { Text(option.label) }) }
+                    }
                     GlassTextField(value = query, onValueChange = { query = it },
                         modifier = Modifier.fillMaxWidth().testTag("plugin-search"),
                         placeholder = "搜索学校、插件或功能", leadingIcon = Icons.Outlined.Search,
@@ -275,7 +286,7 @@ class PluginCenterActivity : ComponentActivity() {
                                 selectedLabelColor = MaterialTheme.colorScheme.primary,
                                 selectedLeadingIconColor = MaterialTheme.colorScheme.primary),
                             leadingIcon = if (!onlySchool) null else ({ Icon(Icons.Outlined.Check, null, Modifier.size(16.dp)) }),
-                            label = { Text("适用本校") })
+                            label = { Text("仅本校") })
                     }
                 }
                 LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().testTag("plugin-list"),
@@ -405,6 +416,9 @@ class PluginCenterActivity : ComponentActivity() {
             }
         }
         selected?.let { pkg ->
+            var detailSection by rememberSaveable(pkg.digest) { mutableStateOf("overview") }
+            var allHistory by rememberSaveable(pkg.digest) { mutableStateOf(false) }
+            var expandedNetwork by rememberSaveable(pkg.digest) { mutableStateOf(false) }
             val catalogMetadata = if (pkg.official) AcademicProviderRegistry.packages().metadata(pkg.manifest.id) else null
             val metadata = PluginSourceDetails.release(pkg, catalogMetadata)
             val source = PluginSourceDetails.source(pkg, catalogMetadata)
@@ -420,7 +434,17 @@ class PluginCenterActivity : ComponentActivity() {
                     else TextButton(onClick = { selected = null }) { Text("完成") }
                 }) {
                 Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (detailSection != "overview") TextButton(onClick = { detailSection = "overview" }) { Text("返回简介") }
+                    if (detailSection == "overview") {
                     Text(metadata?.optString("description")?.ifBlank { null } ?: pkg.manifest.json.optString("description").ifBlank { "作者尚未提供介绍" })
+                    Detail("适用范围", PluginDiscovery.scope(pkg.manifest.json, school))
+                    Detail("类型", PluginDiscovery.typeLabel(pkg.manifest.json))
+                    Detail("审核", if (pkg.bundled) "App 内置" else if (PluginReviewProof.reviewed(pkg)) "有人工审核记录；查看审核范围" else "缺少本包审核凭证")
+                    Detail("作者", author?.optString("name")?.ifBlank { null } ?: pkg.manifest.json.optString("author").ifBlank { "作者未公开" })
+                    Detail("版本与兼容", "${pkg.manifest.version} · API ${pkg.manifest.apiVersion}" + if (pkg.official) " · 已验证签名" else " · 本地包")
+                    listOf("security" to "权限与数据", "source" to "来源与许可", "support" to "支持与验证", "history" to "版本历史").forEach { (id, title) -> TextButton(onClick = { detailSection = id }) { Text(title) } }
+                    }
+                    if (detailSection == "support") {
                     Detail("声明支持", features.joinToString("、").ifBlank { "未声明功能" })
                     val verification = metadata?.optJSONObject("verification")
                     Detail("实际验证", verification?.let { item ->
@@ -429,6 +453,8 @@ class PluginCenterActivity : ComponentActivity() {
                             item.optJSONArray("checks")?.let(PluginJson::strings)?.joinToString("、"),
                             item.optJSONArray("limitations")?.let(PluginJson::strings)?.joinToString("\n")).filter { it.isNotBlank() }.joinToString("\n").ifBlank { null }
                     } ?: "尚无公开验收记录")
+                    }
+                    if (detailSection == "source") {
                     Detail("作者", author?.optString("name")?.ifBlank { null } ?: pkg.manifest.json.optString("author").ifBlank { "作者未公开" })
                     author?.optString("bio")?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     if (authorRef.isNotBlank()) TextButton(onClick = { web("/authors/" + Uri.encode(authorRef)) }) { Text("作者主页") }
@@ -443,6 +469,9 @@ class PluginCenterActivity : ComponentActivity() {
                         }
                         TextButton(onClick = { web(PluginSourceDetails.page(pkg)) }) { Text("本版本源码与参与修改") }
                     }
+                    Detail("安装包 SHA-256", pkg.digest)
+                    }
+                    if (detailSection == "security") {
                         val security = PluginDataGuard(this@PluginCenterActivity, pkg)
                         Detail("审核", if (pkg.bundled) "App 内置" else if (PluginReviewProof.reviewed(pkg)) "此包已有绑定摘要的人工审核记录" else "未取得此包的审核凭证；用户信任按包记住")
                         Detail("个人数据", if (security.sensitive()) "已接触个人数据；外传需独立授权" else "尚未读取受保护学业数据")
@@ -459,13 +488,26 @@ class PluginCenterActivity : ComponentActivity() {
                         }) { Text("撤销教务登录授权") }
                     }
                     Detail("权限", pkg.manifest.permissions.joinToString("、") { permissionName(it) }.ifBlank { "无额外权限" })
-                    Detail("网络范围", pkg.manifest.network.toString())
+                    pkg.manifest.network.forEach { rule ->
+                        Detail(rule.getString("origin"), PluginJson.strings(rule.optJSONArray("purposes")).joinToString("、"))
+                        if (expandedNetwork) Text(rule.optString("pathPrefix", "/") + " · " + PluginJson.strings(rule.optJSONArray("methods")).joinToString("、"))
+                    }
+                    TextButton(onClick = { expandedNetwork = !expandedNetwork }) { Text(if (expandedNetwork) "收起请求限制" else "查看路径与方法限制") }
+                    val accesses = security.status().optJSONArray("events")
+                    accesses?.let(PluginJson::objects)?.forEach { event -> Text(event.optString("origin") + " · " + event.optString("event"), style = MaterialTheme.typography.bodySmall) }
+                    }
+                    if (detailSection == "support") {
                     val matchRules = metadata?.optJSONArray("matches") ?: pkg.manifest.json.optJSONArray("matches")
                     Detail("适用范围", matchRules?.let(PluginJson::objects)?.joinToString("\n") { it.getString("host") + (if (it.has("port")) ":${it.getInt("port")}" else "") + it.optString("pathPrefix", "/") }
                         ?.ifBlank { null } ?: pkg.manifest.json.optJSONObject("school")?.optString("name") ?: "通用服务")
+                    }
+                    if (detailSection == "history") {
                     Detail("版本说明", metadata?.optString("releaseNotes")?.ifBlank { null } ?: pkg.manifest.json.optString("releaseNotes").ifBlank { "暂无版本说明" })
                     val releases = (metadata?.optJSONArray("releases") ?: metadata?.optJSONArray("versions"))?.let(PluginJson::objects).orEmpty()
-                    releases.forEach { Detail(it.getString("version"), it.optString("notes").ifBlank { "未提供说明" }) }
+                    (if (allHistory) releases else releases.take(3)).forEach { Detail(it.getString("version"), it.optString("notes").ifBlank { "未提供说明" }) }
+                    if (releases.size > 3) TextButton(onClick = { allHistory = !allHistory }) { Text(if (allHistory) "仅显示最近三条" else "查看全部版本") }
+                    }
+                    if (detailSection == "overview") {
                     if (!fromLogin && school?.id == UserManager.getInstance().currentSchool?.id && (pkg.manifest.isService || pkg.manifest.isNative && pkg.manifest.contributes.getJSONArray("pages").length() > 0) && enabled && (school == null || AcademicProviderRegistry.matches(pkg, school))) {
                         LiquidButton(onClick = { selected = null; if (pkg.manifest.isNative) NativePluginActivity.open(this@PluginCenterActivity, pkg) else ServicePluginActivity.open(this@PluginCenterActivity, pkg) },
                             modifier = Modifier.fillMaxWidth(), style = LiquidButtonStyle.Tinted) { Text("打开插件") }
@@ -490,11 +532,12 @@ class PluginCenterActivity : ComponentActivity() {
                     }
                     TextButton(onClick = { PluginFeedback.open(this@PluginCenterActivity, pkg) }) { Text("快捷反馈") }
                     TextButton(onClick = { selected = null; uninstall = pkg }) { Text(if (AcademicProviderRegistry.installedOverride(pkg)) "卸载插件" else "停用内置插件", color = MaterialTheme.colorScheme.error) }
+                    }
                 }
             }
         }
         uninstall?.let { pkg -> SystemDialog(onDismissRequest = { uninstall = null }, title = { Text(if (AcademicProviderRegistry.installedOverride(pkg)) "卸载 ${pkg.manifest.name}？" else "停用 ${pkg.manifest.name}？") },
-            confirmButton = { TextButton(onClick = { run { withContext(Dispatchers.IO) { AcademicProviderRegistry.removePlugin(pkg) }; refresh(); generation++ }; uninstall = null }) { Text("卸载") } },
+            confirmButton = { TextButton(onClick = { run { withContext(Dispatchers.IO) { AcademicProviderRegistry.removePlugin(pkg) }; refresh(); generation++ }; uninstall = null }) { Text(if (AcademicProviderRegistry.installedOverride(pkg)) "卸载" else "停用") } },
             dismissButton = { TextButton(onClick = { uninstall = null }) { Text("取消") } }) {
             Text(AcademicProviderRegistry.removalDescription(pkg))
         } }
@@ -514,7 +557,7 @@ class PluginCenterActivity : ComponentActivity() {
                     Column(Modifier.weight(1f).then(if (onDetails == null) Modifier else Modifier.clickable(onClick = onDetails))) {
                         Text(entry.optString("name", entry.getString("id")), style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(scope, style = MaterialTheme.typography.labelSmall, color = colors.primary,
+                        Text("${PluginDiscovery.typeLabel(entry)} · $scope", style = MaterialTheme.typography.labelSmall, color = colors.primary,
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
                     if (onDetails != null) IconButton(onClick = onDetails) { Icon(Icons.Outlined.Info, "插件详情") }

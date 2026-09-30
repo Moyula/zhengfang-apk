@@ -1171,7 +1171,7 @@ private fun SystemDialogContent(
 
     // 320dp 是设计宽度；窄屏上按屏宽收，两侧至少留 20dp，不顶满边缘。
     val screen = rememberScreenMetrics()
-    val dialogWidth = minOf(320.dp, screen.widthDp - 40.dp)
+    val dialogWidth = minOf(if (screen.widthDp < 600.dp) 320.dp else 560.dp, screen.widthDp - 40.dp)
     // 短屏把卡片内边距与两处间距一起收，合计给正文多让出约 30dp。
     val dialogHorizontalPadding = screen.tall(24.dp, 20.dp)
     val dialogVerticalPadding = screen.tall(24.dp, 18.dp)

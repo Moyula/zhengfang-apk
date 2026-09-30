@@ -95,7 +95,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
         val charset = Charset.forName(charsetName)
         // Reject invalid destinations before asking the user anything.
         requestRule(url, method, purpose, form)
-        sharedRequest?.invoke(url, method, purpose, form)
+        if (!sharedSite()) sharedRequest?.invoke(url, method, purpose, form)
         val approvedSharedWrite = sharedApproval?.invoke(JSONObject(payload.toString())) == true
         val supplied = JSONObject((payload.optJSONObject("headers") ?: JSONObject()).toString())
         // Only the host's authorized shared-session path supplies this callback.
@@ -166,7 +166,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
             operation.requireActive()
             authScope?.requireAllowed(url, method)
             val rule = requestRule(url, method, purpose, form, if (token != null && !academicToken) "X-Token" else null)
-            sharedRequest?.invoke(url, method, purpose, form)
+            if (!sharedSite()) sharedRequest?.invoke(url, method, purpose, form)
             if (sharedRequest == null) dataGuard?.requireNetwork(url)
             if (sessionToken != null && sharedToken?.invoke(url) != sessionToken)
                 throw PluginException(PluginErrorCode.SESSION_EXPIRED, "教务令牌已改变，请重新发起请求")

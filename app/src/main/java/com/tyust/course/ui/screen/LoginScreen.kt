@@ -103,16 +103,17 @@ fun LoginScreen(
     onConfirmBinding: () -> Unit = {},
     onCancelBinding: () -> Unit = {}
 ) {
-    var cookie by remember { mutableStateOf(cookieValue) }
+    val form: LoginFormState = androidx.lifecycle.viewmodel.compose.viewModel()
+    var cookie by form::cookie
     var loginTab by rememberSaveable { mutableStateOf(if (onPasswordLogin != null) 0 else 1) }
     var username by rememberSaveable { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
+    var password by form::password
     var showCaptchaDialog by remember { mutableStateOf(false) }
     var captchaInput by remember { mutableStateOf("") }
     var captchaSubmitting by remember { mutableStateOf(false) }
     var captchaDismissed by remember { mutableStateOf(false) }
-    LaunchedEffect(loginContextRevision) {
-        cookie = cookieValue
+    LaunchedEffect(selectedSchoolId, loginContextRevision) {
+        form.selectContext(selectedSchoolId.orEmpty() + ":" + loginContextRevision, cookieValue)
         captchaInput = ""
         captchaSubmitting = false
         showCaptchaDialog = false
@@ -168,7 +169,7 @@ fun LoginScreen(
 
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxSize().wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = 680.dp)
                 .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -461,6 +462,8 @@ fun LoginScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = SemanticDanger
                                 )
+                                val reportContext = androidx.compose.ui.platform.LocalContext.current
+                                TextButton(onClick = { reportContext.startActivity(android.content.Intent(reportContext, com.tyust.course.diagnostics.ErrorReportActivity::class.java)) }) { Text("查看本机错误报告") }
                                 if (onSchoolPlugins != null && !isLoading) TextButton(onClick = onSchoolPlugins) {
                                     Text("检查学校插件")
                                 }

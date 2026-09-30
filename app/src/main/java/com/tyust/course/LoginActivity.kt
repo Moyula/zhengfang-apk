@@ -152,6 +152,8 @@ class LoginActivity : ComponentActivity() {
         selectedLoginSchool = savedInstanceState?.getString("login_school")?.let { UserManager.getInstance().getSchoolById(it) }
             ?: UserManager.getInstance().currentSchool
         manualLoginInteraction = savedInstanceState?.getBoolean("manual_login") ?: false
+        loginContextRevision = savedInstanceState?.getInt("login_context_revision") ?: 0
+        if (savedInstanceState?.getBoolean("login_inflight") == true) errorMessage = "窗口已重建，上次登录已中断，请重试；不会自动重复提交。"
         
             // 🔄 每次启动 App 都同步云端激活配置（获取最新的 max_students）
         lifecycleScope.launch {
@@ -288,6 +290,8 @@ class LoginActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("login_school", selectedLoginSchool?.id)
         outState.putBoolean("manual_login", manualLoginInteraction)
+        outState.putInt("login_context_revision", loginContextRevision)
+        outState.putBoolean("login_inflight", isLoading || captchaImageBytes != null)
         super.onSaveInstanceState(outState)
     }
 

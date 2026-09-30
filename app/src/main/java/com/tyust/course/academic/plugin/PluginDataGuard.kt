@@ -25,6 +25,7 @@ class PluginDataGuard(app: Context, private val pkg: PluginPackage) {
     fun declaration(url: HttpUrl): JSONObject? = pkg.manifest.json.optJSONArray("dataDisclosure")?.let(PluginJson::objects)
         ?.singleOrNull { it.optString("origin") == origin(url) &&
             "academic" in PluginJson.strings(it.optJSONArray("categories") ?: JSONArray()) }
+    fun requireCurrent() { if (prefs.getLong("generation:$id", 0L) != generation) denied() }
     fun allowed(url: HttpUrl): Boolean = !sensitive() || declaration(url) != null && prefs.getBoolean(key(origin(url)), false)
     fun authorize(url: HttpUrl) = synchronized(lock) {
         if (prefs.getLong("generation:$id", 0L) != generation || declaration(url) == null) denied()
@@ -36,6 +37,7 @@ class PluginDataGuard(app: Context, private val pkg: PluginPackage) {
     }
     fun untrack(operation: PluginOperation) = synchronized(lock) { active[id]?.remove(operation); Unit }
     fun requireNetwork(url: HttpUrl) {
+        requireCurrent()
         if (!allowed(url)) { audit("blocked", origin(url)); denied() }
         if (sensitive()) audit("disclosure", origin(url))
     }

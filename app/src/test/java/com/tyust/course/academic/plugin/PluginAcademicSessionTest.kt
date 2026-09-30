@@ -81,6 +81,13 @@ class PluginAcademicSessionTest {
         assertThrows(PluginException::class.java) { reopened.authorizeSite(true) }
         assertFalse(access(caller).siteAuthorized())
     }
+    @Test fun onceConsentCoversTheCurrentLoginSessionButNeverANewLogin() {
+        val caller = pkg().copy(official = false)
+        val a = access(caller); a.authorizeSite(false)
+        repeat(20) { assertTrue(access(caller).siteAuthorized()) }
+        user.saveCookieLogin("SYNTHETIC=new-login")
+        assertFalse(access(caller).siteAuthorized())
+    }
     @Test fun siteScopeRejectsForeignOriginsEncodedPathsAndNeverPromotesLegacyConsent() {
         val caller = pkg(); val a = access(caller)
         a.authorize(remember = true); assertFalse(access(caller).siteAuthorized())

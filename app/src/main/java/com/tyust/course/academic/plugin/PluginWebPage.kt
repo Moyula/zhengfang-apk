@@ -25,6 +25,7 @@ import org.json.JSONObject
 @SuppressLint("SetJavaScriptEnabled")
 @Composable fun PluginWebPage(pkg: PluginPackage, page: PluginPage, session: AcademicSession, interaction: NativePluginInteraction, active: () -> Boolean) {
     val app = LocalContext.current
+    val bridgeCapabilities = remember { PluginJson.objects(org.json.JSONArray(app.assets.open("academic-plugin/host-capabilities.json").bufferedReader().use { it.readText() })).filter { it.optBoolean("web", false) }.map { it.getString("name") }.toSet() }
     val declaration = NativePluginContract.page(pkg.manifest, page.templateId)
     val serverId = declaration.getString("serverId")
     val accounts = remember { PluginServiceAccounts(app) }
@@ -86,7 +87,7 @@ import org.json.JSONObject
                         requestInstance = instance
                         gate.accept(sourceOrigin.toString(), isMainFrame, instance, requestId)
                         val capability = request.getString("capability")
-                        if (capability !in BRIDGE_CAPABILITIES || !active()) throw PluginException(PluginErrorCode.PERMISSION_DENIED, "网页未获此宿主能力")
+                        if (capability !in bridgeCapabilities || !active()) throw PluginException(PluginErrorCode.PERMISSION_DENIED, "网页未获此宿主能力")
                         val currentHost = host ?: throw PluginException(PluginErrorCode.STALE_CONTEXT, "网页尚未就绪")
                         val gesture = SystemClock.elapsedRealtime() - gestureAt in 0..1500
                         gestureAt = 0
@@ -143,5 +144,3 @@ import org.json.JSONObject
         }
     }
 }
-
-private val BRIDGE_CAPABILITIES = setOf("pages.register", "pages.open", "pages.close", "pages.unregister", "navigation.page", "navigation.back", "navigation.url", "files.pick", "files.read", "files.create", "files.write", "files.open", "files.share", "academic.study.snapshot", "academic.study.refresh", "academic.schedule.preview", "academic.schedule.confirm", "services.discover", "services.call", "workflow.prepare", "workflow.step", "workflow.reconcile", "workflow.cancel", "workflow.list")

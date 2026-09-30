@@ -44,7 +44,7 @@ interface NativePluginInteraction {
 
 class NativeCapabilityHost(
     val app: Context, val pkg: PluginPackage, val session: AcademicSession,
-    private val interaction: NativePluginInteraction?, private val disclosureOrigin: String? = null, private val active: () -> Boolean
+    private val interaction: NativePluginInteraction?, private val disclosureOrigin: String? = null, private val viewport: (() -> JSONObject?)? = null, private val active: () -> Boolean
 ) {
     private val dataGuard = PluginDataGuard(app, pkg)
     val namespace = PluginStorageScope.session(session, pkg.manifest.id, !pkg.official)
@@ -108,6 +108,7 @@ class NativeCapabilityHost(
             throw PluginException(PluginErrorCode.UNSUPPORTED, "加密凭据绑定需要声明并调用 $name 版本 2")
         val result = PluginExecutionBudget.run(effect.optLong("timeoutMs", 120_000).coerceIn(1000, 600_000)) {
             when (name) {
+                "ui.viewport" -> viewport?.invoke() ?: throw PluginException(PluginErrorCode.UNSUPPORTED, "视口只在前台原生页面可用")
                 "academic.session.authorize" -> authorizeAcademic(flow)
                 "privacy.status" -> dataGuard.status()
                 "privacy.revoke" -> { dataGuard.revoke(); JSONObject.NULL }
@@ -188,9 +189,8 @@ class NativeCapabilityHost(
                 "files.upload" -> {
                     requireNetworkPermission()
                     val request = input.getJSONObject("request")
-                    authorizeDisclosure(request.getString("url"), flow)
                     if (request.optString("method") != "POST" || request.optString("purpose") != "mutation") throw PluginException(PluginErrorCode.VALIDATION_FAILED, "文件上传须声明 POST 写入")
-                    confirm(flow, "上传文件", "${pkg.manifest.name} 将上传 ${files.info(input.getString("handle")).getString("name")} 到 ${request.getString("url")}")
+                    authorizeAction(request, flow, "上传文件", "文件：${files.info(input.getString("handle")).getString("name")}")
                     callHost("http", credentialRequest(request), true, files.file(input.getString("handle")), input.getString("field"), flow) as JSONObject
                 }
                 "files.open", "files.share" -> {
@@ -253,11 +253,10 @@ class NativeCapabilityHost(
                     PluginServiceAccounts(app).remove(pkg, input.getString("serverId"), input.getString("accountId")); JSONObject.NULL }
                 "navigation.back" -> { withContext(Dispatchers.Main) { interaction!!.back() }; JSONObject.NULL }
                 "navigation.url" -> {
-                    authorizeDisclosure(input.getString("url"), flow)
                     val url = input.getString("url").toHttpUrlOrNull() ?: throw PluginException(PluginErrorCode.UNTRUSTED_URL, "无效网址")
                     PluginNetworkPolicy(pkg.manifest.network).requireAllowed(url, "GET", "query", null)
-                    confirm(flow, "打开网页", "${pkg.manifest.name} 请求打开 ${url.host} 的网页")
-                    withContext(Dispatchers.Main) { app.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url.toString())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }; JSONObject.NULL
+                    authorizeAction(JSONObject().put("url", url.toString()).put("purpose", "query"), flow, "打开网页", "${pkg.manifest.name} 请求打开此网站")
+                    withContext(Dispatchers.Main) { ensureActive(); dataGuard.requireNetwork(url); app.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url.toString())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }; JSONObject.NULL
                 }
                 "runtime.cancel" -> { cancelEffects(PluginJson.strings(input.getJSONArray("effectIds"))); JSONObject.NULL }
                 "data.query" -> NativePluginRunner.invoke(app, pkg, session, "data.query", input, JSONObject().put("capabilities", capabilities()), active = active)
@@ -266,11 +265,14 @@ class NativeCapabilityHost(
         }
         ensureActive()
         if (disclosureOrigin != null) authorizeDisclosure(disclosureOrigin, flow)
+        ensureActive()
+        if (name != "privacy.revoke") dataGuard.requireCurrent()
         schema.validate(result, descriptor.getJSONObject("output"))
         return result
     }
     private fun requireNetworkPermission() { if ("network" !in pkg.manifest.permissions) denied("文件传输还需要网络权限") }
     private suspend fun authorizeDisclosure(url: String, flow: NativeFlow) {
+        dataGuard.requireCurrent()
         val destination = url.toHttpUrlOrNull() ?: denied("地址无效")
         if (!dataGuard.allowed(destination)) {
             val declaration = dataGuard.declaration(destination) ?: denied("插件未声明个人数据接收方")
@@ -278,9 +280,24 @@ class NativeCapabilityHost(
             dataGuard.authorize(destination)
         }
     }
+    private suspend fun authorizeAction(request: JSONObject, flow: NativeFlow, title: String, summary: String) {
+        val destination = request.getString("url").toHttpUrlOrNull() ?: denied("地址无效")
+        PluginNetworkPolicy(pkg.manifest.network).requireAllowed(destination, request.optString("method", "GET"), request.getString("purpose"), request.optJSONObject("form"))
+        dataGuard.requireCurrent()
+        val disclosure = if (dataGuard.allowed(destination)) null else (dataGuard.declaration(destination)
+            ?: denied("插件未声明个人数据接收方"))
+        val message = summary + "\n接收网站：${PluginAuthScope.origin(destination)}" +
+            "\n请求：${request.optString("method", "GET")} ${destination.encodedPath.take(200)}" +
+            (request.opt("body")?.let { "\n提交内容（最多显示 1000 字）：\n" + it.toString().take(1000) } ?: request.optJSONObject("form")?.let { "\n表单字段：" + it.keys().asSequence().take(30).joinToString("、") } ?: "") +
+            (disclosure?.let { "\n将提供学业数据，用途：${it.getString("purpose")}。记住此接收方授权，可在插件详情撤销。App 无法控制网站收到数据后的使用。" } ?: "")
+        confirm(flow, title, message)
+        dataGuard.requireCurrent()
+        if (disclosure != null) dataGuard.authorize(destination)
+        dataGuard.requireNetwork(destination)
+    }
     private suspend fun network(request: JSONObject, flow: NativeFlow): JSONObject {
-        authorizeDisclosure(request.getString("url"), flow)
-        if (request.optString("purpose") == "mutation") confirm(flow, "确认提交", "${pkg.manifest.name} 请求向 ${request.getString("url")} 提交数据。请确认这是你要执行的操作。")
+        if (request.optString("purpose") == "mutation") authorizeAction(request, flow, "确认提交", "${pkg.manifest.name} 请求提交数据")
+        else authorizeDisclosure(request.getString("url"), flow)
         return callHost("http", credentialRequest(request), request.optString("purpose") == "mutation", flow = flow) as JSONObject
     }
     private fun credentialRequest(request: JSONObject): JSONObject {
@@ -330,6 +347,6 @@ class NativeCapabilityHost(
     fun close() { operations.forEach(PluginOperation::close); operations.clear(); ioScope.cancel(); if (active()) PluginSessionCookies.save(app, pkg, session) }
     companion object {
         val PLATFORM = setOf("privacy.status", "privacy.revoke", "pages.register", "pages.open", "pages.close", "pages.unregister", "accounts.select", "accounts.remove", "services.discover", "services.call", "workflow.prepare", "workflow.step", "workflow.reconcile", "workflow.cancel", "workflow.list", "academic.study.snapshot", "academic.study.refresh", "academic.schedule.preview", "academic.schedule.confirm", "academic.session.authorize", "academic.session.request", "academic.session.revoke")
-        val IMPLEMENTED = setOf("network.request", "storage.get", "storage.set", "storage.remove", "auth.prompt", "credentials.find", "credentials.remove", "session.save", "session.restore", "session.clear", "files.pick", "files.create", "files.read", "files.write", "files.remove", "files.download", "files.upload", "files.open", "files.share", "device.clipboard.read", "device.clipboard.write", "device.haptic", "tasks.schedule", "tasks.cancel", "tasks.list", "notifications.post", "navigation.page", "navigation.back", "navigation.url", "runtime.cancel", "data.query")
+        val IMPLEMENTED = setOf("ui.viewport", "network.request", "storage.get", "storage.set", "storage.remove", "auth.prompt", "credentials.find", "credentials.remove", "session.save", "session.restore", "session.clear", "files.pick", "files.create", "files.read", "files.write", "files.remove", "files.download", "files.upload", "files.open", "files.share", "device.clipboard.read", "device.clipboard.write", "device.haptic", "tasks.schedule", "tasks.cancel", "tasks.list", "notifications.post", "navigation.page", "navigation.back", "navigation.url", "runtime.cancel", "data.query")
     }
 }

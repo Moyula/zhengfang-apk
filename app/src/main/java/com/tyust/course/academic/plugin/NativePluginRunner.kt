@@ -50,6 +50,7 @@ class NativeUiSession(
     val snapshot = mutableSnapshot.asStateFlow()
     private var state: Any? = JSONObject()
     private var templateId = ""
+    private var previousViewport = ""
     private val sandboxConnection = com.tyust.course.academic.plugin.runtime.PluginSandboxConnections.acquire(app)
     private var closed = false
     init {
@@ -86,6 +87,7 @@ class NativeUiSession(
         effects.values.toList().forEach(Job::cancel); effects.clear(); queuedInputs.clear()
         while (events.tryReceive().isSuccess) { /* Retire queued events from the old page. */ }
         state = JSONObject()
+        previousViewport = ""
         val instance = UUID.randomUUID().toString()
         mutableSnapshot.value = NativeUiSnapshot(pageId, instance, busy = true)
         if (!events.trySend(Pending(instance, JSONObject(), NativeFlow(false), init = true, params = params)).isSuccess) showError(PluginException(PluginErrorCode.RESOURCE_LIMIT, "页面请求过多"))
@@ -101,6 +103,19 @@ class NativeUiSession(
         val pending = Pending(instance, event, NativeFlow(userGesture))
         if (events.trySend(pending).isSuccess) { if (event.optString("type") == "input") queuedInputs[nodeId] = pending }
         else showError(PluginException(PluginErrorCode.RESOURCE_LIMIT, "操作过快，请稍后重试"))
+    }
+    fun viewportChanged(value: JSONObject) {
+        val serialized = value.toString()
+        if (previousViewport == serialized) return
+        val declaration = runCatching { NativePluginContract.page(pkg.manifest, templateId) }.getOrNull() ?: return
+        val requirements = PluginJson.objects(declaration.optJSONArray("requires") ?: org.json.JSONArray()) +
+            PluginJson.objects(pkg.manifest.json.optJSONArray("requires") ?: org.json.JSONArray())
+        if (requirements.none { it.optString("name") == "ui.viewport" && it.optInt("version") == 1 }) return
+        val instance = mutableSnapshot.value.instance
+        if (!isCurrent(instance)) return
+        queuedInputs["viewport"]?.let { it.event.put("value", value); previousViewport = serialized; return }
+        val pending = Pending(instance, JSONObject().put("type", "lifecycle").put("name", "viewport.changed").put("value", value), NativeFlow(false))
+        if (events.trySend(pending).isSuccess) { queuedInputs["viewport"] = pending; previousViewport = serialized }
     }
     fun menu(action: JSONObject) {
         val page = action.optString("pageId")

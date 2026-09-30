@@ -16,6 +16,9 @@ object PluginPlatformContract {
     fun validate(manifest: PluginManifest) {
         val m = manifest.json
         unique(m.optJSONArray("requires"), "name")
+        val viewportRequirements = PluginJson.objects(m.optJSONArray("requires") ?: JSONArray()) +
+            PluginJson.objects(manifest.contributes.optJSONArray("pages") ?: JSONArray()).flatMap { PluginJson.objects(it.optJSONArray("requires") ?: JSONArray()) }
+        if (viewportRequirements.any { it.optString("name") == "ui.viewport" } && m.optInt("minAppVersionCode", 0) < 96) invalid("视口能力需要 minAppVersionCode 96")
         PluginAcademicTokenRule.validate(manifest)
         if (manifest.network.any { it.has("authHeader") } &&
             (manifest.apiVersion != 3 || manifest.network.any { it.has("authHeader") && it.optString("authHeader") != "X-Token" } ||

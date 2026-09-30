@@ -51,7 +51,7 @@
             android:configChanges="uiMode"
             android:enableOnBackInvokedCallback="true"
             android:exported="true"
-            android:screenOrientation="portrait"
+            android:screenOrientation="@integer/main_orientation"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -64,26 +64,26 @@
             android:theme="@style/Theme.CourseSelector.Starting"
             android:configChanges="uiMode"
             android:exported="false"
-            android:screenOrientation="portrait" />
+            android:screenOrientation="@integer/main_orientation" />
         <activity
             android:name=".CookieWebViewActivity"
             android:configChanges="uiMode"
             android:exported="false"
-            android:screenOrientation="portrait"
+            android:screenOrientation="@integer/main_orientation"
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".AcademicWebViewActivity"
             android:configChanges="uiMode"
             android:process=":academic_webview"
             android:exported="false"
-            android:screenOrientation="portrait"
+            android:screenOrientation="@integer/main_orientation"
             android:windowSoftInputMode="adjustResize" />
         <activity android:name=".CourseDetailActivity" android:exported="false" android:configChanges="uiMode" />
         <activity
             android:name=".SurveyWebViewActivity"
             android:exported="false"
             android:configChanges="uiMode"
-            android:screenOrientation="portrait"
+            android:screenOrientation="@integer/main_orientation"
             android:windowSoftInputMode="adjustResize" />
         
         <activity android:name=".academic.plugin.PluginCenterActivity" android:exported="false" android:configChanges="uiMode" />

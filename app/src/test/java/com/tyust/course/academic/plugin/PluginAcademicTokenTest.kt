@@ -289,9 +289,9 @@ class PluginAcademicTokenTest {
         try {
             val grants = coroutineScope { List(2) { async { native.execute(effect("academic.session.authorize", JSONObject()), NativeFlow(true)) as JSONObject } }.awaitAll() }
             assertEquals(grants[0].getString("grant"), grants[1].getString("grant")); assertEquals(1, prompts)
-            repeat(3) {
+            repeat(20) {
                 server.enqueue(MockResponse().setBody("{}"))
-                native.execute(effect("academic.session.request", JSONObject().put("grant", grants[0].getString("grant")).put("request", seen()), 2), NativeFlow(true))
+                native.execute(effect("academic.session.request", JSONObject().put("grant", grants[0].getString("grant")).put("request", seen()), 2), NativeFlow(false))
                 server.takeRequest(2, TimeUnit.SECONDS)
             }
             assertEquals(1, prompts)

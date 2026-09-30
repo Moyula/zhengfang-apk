@@ -107,7 +107,7 @@ internal class PluginAcademicSession(
             "学校站点：${siteOrigins.joinToString("\n")}\n\n" +
             "允许查询、读取正文及更新已读等站内请求，刷新时不再逐条询问。站点授权无法判断每个接口的业务含义，请仅信任可靠来源。\n" +
             (if (local) "此次信任按包保存，未认定为官方审核；调用插件或登录提供者换包后需重新确认。\n" else "") +
-            "记住后关闭页面、同账号重登无需再授权；可在插件详情撤销。选退课、评教等业务入口仍需确认，向其他网站提供个人数据另行授权。"
+            "仅本次在当前登录会话内有效；记住后关闭页面、同账号重登无需再授权；可在插件详情撤销。选退课、评教等业务入口仍需确认，向其他网站提供个人数据另行授权。"
     }
 
     /** Called only after the host confirmation completes; recheck every captured identity. */

@@ -98,14 +98,14 @@ fun SettingsRoute(
     var schoolName by remember { mutableStateOf("") }
     
     // UI States
-    var showSchoolDialog by remember { mutableStateOf(false) }
+    var showSchoolDialog by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
     var showAcademicSupport by remember { mutableStateOf(false) }
     var showCreditsDialog by remember { mutableStateOf(false) }
     var showQuotaDialog by remember { mutableStateOf(false) }
-    var showAccountManagerDialog by remember { mutableStateOf(false) }
+    var showAccountManagerDialog by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var pendingPasswordDelete by remember { mutableStateOf<UserManager.AccountRecord?>(null) }
     var pendingAccountDelete by remember { mutableStateOf<UserManager.AccountRecord?>(null) }
     var showSchoolAdaptation by remember { mutableStateOf(false) }
@@ -626,6 +626,10 @@ fun SettingsRoute(
             },
             onDeletePassword = { pendingPasswordDelete = it },
             onDeleteAccount = { pendingAccountDelete = it },
+            onRelogin = { showAccountManagerDialog = false; relogin.launch(Intent(context, LoginActivity::class.java).apply {
+                putExtra("force_relogin", true); putExtra(LoginActivity.EXTRA_RETURN_TO_CALLER, true)
+            }) },
+            onLogout = { showAccountManagerDialog = false; showLogoutDialog = true },
             onDismiss = { showAccountManagerDialog = false }
         )
     }
@@ -680,7 +684,7 @@ fun SettingsRoute(
             onDismissRequest = { dismiss() },
             title = {
                 Text(
-                    text = "选择学校",
+                    text = "学校与教务",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -694,6 +698,7 @@ fun SettingsRoute(
                 )
             }
         ) {
+            TextButton(onClick = { showAcademicSupport = true }) { Text("当前适配与支持限制") }
             val schools = remember { UserManager.getInstance().supportedSchools }
             LazyColumn(
                 modifier = Modifier
@@ -942,6 +947,7 @@ private fun AccountManagerDialog(
     onSwitchAccount: (String) -> Unit,
     onDeletePassword: (UserManager.AccountRecord) -> Unit,
     onDeleteAccount: (UserManager.AccountRecord) -> Unit,
+    onRelogin: () -> Unit, onLogout: () -> Unit,
     onDismiss: () -> Unit
 ) {
     SystemDialog(
@@ -982,6 +988,8 @@ private fun AccountManagerDialog(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            TextButton(onClick = onRelogin) { Text("重新登录 · 保留已存账号") }
+            TextButton(onClick = onLogout) { Text("退出当前账号", color = MaterialTheme.colorScheme.error) }
             if (accounts.isEmpty()) {
                 Text(
                     text = "本机还没有保存任何账号。",
