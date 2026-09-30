@@ -29,15 +29,17 @@ class PluginSandboxBindingTest {
     private class BindingContext(base: Context, val bind: (ServiceConnection) -> Boolean) : ContextWrapper(base) {
         lateinit var connection: ServiceConnection
         var unbound = 0
+        var bound = 0
         override fun getApplicationContext(): Context = this
         override fun bindService(service: Intent, conn: ServiceConnection, flags: Int): Boolean {
             connection = conn
+            bound++
             return bind(conn)
         }
         override fun unbindService(conn: ServiceConnection) { assertSame(connection, conn); unbound++ }
     }
     private suspend fun invoke(context: Context, op: PluginOperation, timeout: Long = 100) =
-        PluginSandboxClient(context, timeout).execute("", JSONObject(), op, PluginHost(op, app.cacheDir))
+        PluginSandboxClient(context, timeout, 0).execute("", JSONObject(), op, PluginHost(op, app.cacheDir))
 
     private fun replyingContext(response: JSONObject) = BindingContext(app) { connection ->
         connection.onServiceConnected(ComponentName(app, PluginSandboxService::class.java), object : IPluginSandbox.Stub() {
@@ -89,9 +91,41 @@ class PluginSandboxBindingTest {
             val context = replyingContext(PluginJson.success(response))
             val result = NativePluginRunner.invoke(context, pkg, session, method, JSONObject().put("pageId", "main"), JSONObject(), active = { true })
             assertEquals(count, result.getJSONObject("state").getInt("n"))
-            assertEquals(1, context.unbound)
+            assertEquals(0, context.unbound)
         }
         session.retire()
+    }
+
+    @Test fun pageLeasesReuseOneConnectionAndReleaseAfterThirtyIdleSeconds() = runBlocking {
+        val context = replyingContext(PluginJson.success(JSONObject()))
+        val a = PluginSandboxConnections.acquire(context)
+        val b = PluginSandboxConnections.acquire(context)
+        assertSame(a.ready.await(), b.ready.await()); assertEquals(1, context.bound)
+        a.close(); assertEquals(0, context.unbound); b.close()
+        val clock = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+        clock.idleFor(java.time.Duration.ofSeconds(29)); assertEquals(0, context.unbound)
+        clock.idleFor(java.time.Duration.ofSeconds(2)); assertEquals(1, context.unbound)
+    }
+    @Test fun startupTimeoutRetiresAPinnedConnectionSoRetryCanBindAgain() = runTest {
+        val context = BindingContext(app) { true }
+        val page = PluginSandboxConnections.acquire(context)
+        val failure = runCatching { invoke(context, operation(), 25) }.exceptionOrNull() as PluginException
+        assertEquals(PluginErrorCode.RUNTIME_EXITED, failure.code); assertEquals(1, context.unbound)
+        val retry = PluginSandboxConnections.acquire(context, 0)
+        assertEquals(2, context.bound)
+        page.close(); retry.close(); assertEquals(2, context.unbound)
+    }
+
+    @Test fun deadConnectionNotifiesAllConsumersAndNextRequestBindsFresh() = runBlocking {
+        val context = replyingContext(PluginJson.success(JSONObject())); var disconnected = 0
+        val a = PluginSandboxConnections.acquire(context) { disconnected++ }
+        val b = PluginSandboxConnections.acquire(context) { disconnected++ }
+        val old = a.ready.await()
+        context.connection.onServiceDisconnected(ComponentName(app, PluginSandboxService::class.java))
+        assertEquals(2, disconnected); assertEquals(1, context.unbound)
+        val c = PluginSandboxConnections.acquire(context, 0)
+        assertNotSame(old, c.ready.await()); assertEquals(2, context.bound)
+        a.close(); b.close(); c.close(); assertEquals(2, context.unbound)
     }
 
     @Test fun privateServiceUsesAnIsolatedUidAndIsNotExported() {

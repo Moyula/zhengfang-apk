@@ -23,19 +23,22 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /** Host-side authority. Values supplied by the JS context are never used for account selection. */
-class PluginHost(private val operation: PluginOperation, private val storageRoot: File, cookies: CookieJar = operation.session.cookies,
+class PluginHost(private val operation: PluginOperation, private val storageRoot: File, private val cookies: CookieJar = operation.session.cookies,
     private val captureToken: ((HttpUrl, String, String, Int, String) -> Unit)? = null,
     private val sharedToken: ((HttpUrl) -> Pair<String, String>?)? = null,
     private val tokenSession: com.tyust.course.academic.AcademicSession = operation.session,
     private val dataGuard: PluginDataGuard? = null,
+    private val sharedSite: () -> Boolean = { false },
     private val sharedApproval: ((JSONObject) -> Boolean)? = null,
     private val sharedRequest: ((HttpUrl, String, String, JSONObject?) -> Unit)? = null) {
     private val cookiesForResponse: (HttpUrl) -> List<String> = { url -> cookies.loadForRequest(url).map { it.value } }
     private val policy = PluginNetworkPolicy(operation.manifest.network)
-    private val client = OkHttpClient.Builder().cookieJar(cookies)
-        .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
-        .connectTimeout(20, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
-        .callTimeout(45, TimeUnit.SECONDS).build()
+    private fun requestRule(url: HttpUrl, method: String, purpose: String, form: JSONObject?, authHeader: String? = null): JSONObject {
+        if (!sharedSite()) return policy.requireAllowed(url, method, purpose, form, authHeader)
+        check(sharedRequest != null)
+        sharedRequest.invoke(url, method, purpose, form)
+        return PluginSiteConsent.requireRequest(setOf(PluginAuthScope.origin(url)), url, method, purpose)
+    }
     private val log = mutableListOf<JSONObject>()
     private var requests = 0
     private var calls = 0
@@ -91,9 +94,9 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
         if (charsetName !in setOf("UTF-8", "GBK", "GB2312", "GB18030")) invalid("不支持的编码")
         val charset = Charset.forName(charsetName)
         // Reject invalid destinations before asking the user anything.
-        policy.requireAllowed(url, method, purpose, form)
+        requestRule(url, method, purpose, form)
         sharedRequest?.invoke(url, method, purpose, form)
-        val approvedReadState = sharedApproval?.invoke(JSONObject(payload.toString())) == true
+        val approvedSharedWrite = sharedApproval?.invoke(JSONObject(payload.toString())) == true
         val supplied = JSONObject((payload.optJSONObject("headers") ?: JSONObject()).toString())
         // Only the host's authorized shared-session path supplies this callback.
         sharedRequest?.invoke(url, method, purpose, form)
@@ -114,7 +117,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
                 policy.requireAllowed(it.service, "GET", "auth", null)
             }
         } else null
-        val transport = if (academicToken && sharedRequest == null) client.newBuilder().cookieJar(PluginAcademicCookies(operation.session, operation.manifest.id, authScope) { operation.requireActive() }).build() else client
+        val requestCookies = if (academicToken && sharedRequest == null) PluginAcademicCookies(operation.session, operation.manifest.id, authScope) { operation.requireActive() } else cookies
         if (payload.has("sameOriginReferer") &&
             (payload.opt("sameOriginReferer") !is Boolean || !academicToken)) invalid("同源 Referer 仅支持 API 3 教务插件")
         val sameOriginReferer = payload.optBoolean("sameOriginReferer", false)
@@ -135,7 +138,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
             catch (_: IllegalArgumentException) { invalid("网页登录凭据编码无效") }
         }
         val boundToken = if (cookieBinding != null) {
-            policy.requireAllowed(url, method, purpose, form)
+            requestRule(url, method, purpose, form)
             sharedRequest?.invoke(url, method, purpose, form)
             val header = cookieBinding.optString("header")
             if (supplied.keys().asSequence().any { it.equals(header, true) }) invalid("认证请求头不可重复")
@@ -162,7 +165,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
         while (true) {
             operation.requireActive()
             authScope?.requireAllowed(url, method)
-            val rule = policy.requireAllowed(url, method, purpose, form, if (token != null && !academicToken) "X-Token" else null)
+            val rule = requestRule(url, method, purpose, form, if (token != null && !academicToken) "X-Token" else null)
             sharedRequest?.invoke(url, method, purpose, form)
             if (sharedRequest == null) dataGuard?.requireNetwork(url)
             if (sessionToken != null && sharedToken?.invoke(url) != sessionToken)
@@ -185,10 +188,10 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
                 builder.post(body)
             }
             if (purpose == "mutation") {
-                if (approvedReadState && sharedRequest != null) operation.markReviewedReadState()
+                if (approvedSharedWrite && sharedRequest != null) operation.markAuthorizedSharedWrite()
                 else operation.markMutation()
             }
-            val call = transport.newCall(builder.build())
+            val call = PluginHttpClients.client(operation, url, requestCookies).newCall(builder.build())
             operation.register(call)
             dataGuard?.track(operation)
             try {
@@ -249,7 +252,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
                     }
                 }
             } catch (e: IOException) {
-                throw operation.failure(PluginErrorCode.NETWORK_RETRYABLE, "网络请求中断")
+                throw operation.failure(PluginErrorCode.NETWORK_RETRYABLE, if (e is java.io.InterruptedIOException) "学校响应超时，请重试" else "学校网络连接中断，请重试")
             } finally { operation.unregister(call); dataGuard?.untrack(operation) }
         }
     }

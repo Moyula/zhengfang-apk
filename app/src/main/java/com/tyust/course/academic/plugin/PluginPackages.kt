@@ -192,6 +192,9 @@ class PluginPackageStore(private val context: Context, private val trustedKeys: 
     private fun blocked(id: String, digest: String?) = PluginVersionLeases.busy(id) || NativePluginTasks.busy(context, id) ||
         digest in PluginWorkflowJournal(PluginWorkflowFiles(context)).references()
     fun deactivate(id: String) {
+        PluginOperation.cancelPlugin(id)
+        PluginAcademicSession.cancelProvider(id)
+        PluginHttpClients.clearPlugin(id)
         PluginAcademicSession.revoke(context, id)
         PluginDataGuard.revoke(context, id)
         val removed = synchronized(lock) {
@@ -203,7 +206,7 @@ class PluginPackageStore(private val context: Context, private val trustedKeys: 
         NativePluginTasks.stopPlugin(context, id)
         PluginPages.registry.clearPlugin(id)
         val grants = context.getSharedPreferences("native-plugin-permissions", Context.MODE_PRIVATE)
-        val edit = grants.edit(); grants.all.keys.filter { it.startsWith("$id:") }.forEach(edit::remove); edit.commit()
+        val edit = grants.edit(); grants.all.keys.filter { it.startsWith("$id:") && !it.endsWith(":revocation") }.forEach(edit::remove); edit.commit()
         PluginServiceAccounts(context).cleanRetiredProfiles()
     }
     fun rememberCatalog(catalog: JSONObject, source: String? = null) = synchronized(lock) {

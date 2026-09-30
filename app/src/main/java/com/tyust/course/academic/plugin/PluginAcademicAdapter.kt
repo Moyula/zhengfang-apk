@@ -16,7 +16,7 @@ class PluginAcademicAdapter(
     private val scopeStillActive: () -> Boolean = { true },
     private val inheritedPackage: PluginPackage? = null
 ) : AcademicProtocolAdapter, AcademicStudyAdapter, AcademicCaptchaLogin, SessionBackedAdapter {
-    private val schema = PluginSchema(PluginJson.parse(app.assets.open("academic-plugin/contract.schema.json").bufferedReader().use { it.readText() }))
+    private val schema = PluginContractCache.schema(app)
     private var continuation: String? = null
     private var ownWebLogin: JSONObject? = null
     @Volatile private var loginInProgress = false
@@ -55,20 +55,22 @@ class PluginAcademicAdapter(
         ServicePluginContract.requireRequest(pinned.manifest, method, args, effectiveConfirmation)
         val op = PluginOperation(session, pinned.manifest, method, development = !pinned.official && !pinned.bundled, confirmed = effectiveConfirmation,
             actionId = if (method == "service.action") args.getString("actionId") else null,
-            scopeStillActive = { shared?.requireGrant(grant); scopeStillActive() })
+            packageDigest = pinned.digest, scopeStillActive = { shared?.requireGrant(grant); scopeStillActive() })
         val tokenCapture = if (method.startsWith("auth.") && pinned.manifest.isAcademic && pinned.manifest.json.has("academicSessionToken"))
             PluginAcademicTokenCapture(op, pinned) else null
         val host = PluginHost(op, storageRoot, shared?.cookies(grant) ?: session.cookies,
             captureToken = tokenCapture?.let { it::capture },
-            sharedApproval = shared?.let { access -> { request ->
-                if (reusableAction != null && request.has("body")) throw PluginException(PluginErrorCode.PERMISSION_DENIED, "可复用操作仅接受审核过的结构化参数")
+            sharedSite = { shared?.siteAuthorized() == true },
+                    sharedApproval = shared?.let { access -> { request ->
+                if (!access.siteAuthorized() && reusableAction != null && request.has("body")) throw PluginException(PluginErrorCode.PERMISSION_DENIED, "可复用操作仅接受审核过的结构化参数")
                 if (confirmed) false
+                else if (access.siteAuthorized()) request.getString("purpose") == "mutation"
                 else if (reusableAction != null) access.operation(request)?.optString("risk") == "read-state"
                 else access.requireReviewedReadOrConfirmation(request)
             } },
             sharedToken = shared?.let { access -> { url -> access.tokenHeader(grant, url) } },
             sharedRequest = shared?.let { access -> { url, verb, purpose, form -> access.requireRequest(grant, url, verb, purpose, form)
-                if (reusableAction != null) access.requireRememberedAction(reusableAction, url, verb, purpose, form)
+                if (reusableAction != null && !access.siteAuthorized()) access.requireRememberedAction(reusableAction, url, verb, purpose, form)
             } },
             tokenSession = shared?.session ?: session, dataGuard = if (pinned.manifest.isService || pinned.manifest.isNative && !pinned.manifest.isAcademic) PluginDataGuard(app, pinned) else null)
         val sharedCredential = shared?.session?.pluginToken

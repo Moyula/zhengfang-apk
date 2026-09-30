@@ -207,7 +207,7 @@ class PluginAcademicTokenTest {
         fun runtime() = ServicePluginSession(refreshContext(), pkg, "account", requestConfirmation = { _, _, _ -> prompts++; false },
             readStateConfirmation = { prompts++; null })
         val first = runtime()
-        assertTrue(first.academicAuthorizationDescription().contains("Synthetic seen"))
+        assertTrue(first.academicAuthorizationDescription().contains("学校站点"))
         first.authorizeAcademicSession(remember = true, includeReadState = true)
         repeat(3) { refresh(first) }; first.close()
         val reopened = runtime(); assertTrue(reopened.authenticated); refresh(reopened)
@@ -221,10 +221,12 @@ class PluginAcademicTokenTest {
         val revoked = runtime(); assertFalse(revoked.authenticated); revoked.close()
     }
 
-    @Test fun anExistingLoginConsentNeedsOnlyOneReadStatePromptAcrossRefreshes() = runBlocking {
+    @Test fun anExistingLoginConsentNeedsOneUpgradePromptThenNoRequestPrompts() = runBlocking {
         reviewedProvider(); val pkg = install(serviceManifest("test.refresh-upgrade")); var prompts = 0
-        val runtime = ServicePluginSession(refreshContext(), pkg, "account", readStateConfirmation = { prompts++; true })
-        runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession(remember = true)
+        access(pkg).authorize(remember = true)
+        val runtime = ServicePluginSession(refreshContext(), pkg, "account", readStateConfirmation = { error("No endpoint question") })
+        assertFalse(runtime.authenticated)
+        runtime.ensureAcademicAuthorization { prompts++; "remember" }
         repeat(3) { refresh(runtime) }
         assertEquals(1, prompts); runtime.close()
     }
@@ -240,39 +242,37 @@ class PluginAcademicTokenTest {
         assertFalse(reopened.authenticated); assertFalse(reopened.restoreAcademicAuthorization()); reopened.close()
     }
 
-    @Test fun deniedReadStateAndRevocationWhilePromptingNeverSendARequest() = runBlocking {
+    @Test fun deniedSiteConsentAndRevocationWhilePromptingNeverSendARequest() = runBlocking {
         reviewedProvider(); val pkg = install(serviceManifest("test.refresh-denied")); var prompts = 0
-        val runtime = ServicePluginSession(refreshContext(), pkg, "account", readStateConfirmation = { prompts++; null })
-        runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession(remember = true)
+        val runtime = ServicePluginSession(refreshContext(), pkg, "account")
         val before = server.requestCount
-        assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
+        assertThrows(PluginException::class.java) { runBlocking { runtime.ensureAcademicAuthorization { prompts++; null } } }
         assertEquals(1, prompts); assertEquals(before, server.requestCount); runtime.close()
-        val revoked = ServicePluginSession(refreshContext(), pkg, "account", readStateConfirmation = {
-            PluginAcademicSession.revoke(app, pkg.manifest.id); true
-        })
-        assertThrows(AcademicException::class.java) { runBlocking { revoked.page("main") } }
+        val revoked = ServicePluginSession(refreshContext(), pkg, "account")
+        assertThrows(PluginException::class.java) { runBlocking { revoked.ensureAcademicAuthorization {
+            PluginAcademicSession.revoke(app, pkg.manifest.id); "remember"
+        } } }
         assertEquals(before, server.requestCount); revoked.close()
         assertNull(access(pkg).existingGrant())
     }
 
-    @Test fun groupedReadStateConsentDoesNotAuthorizeUnknownHighRiskRawOrExpandedRequests() = runBlocking {
+    @Test fun siteConsentAcceptsLegacyBodiesButDeniesForeignSitesTokenEndpointsAndWriteReplay() = runBlocking {
         reviewedProvider(); val pkg = install(serviceManifest("test.refresh-boundary")); var next = seen(); var prompts = 0
         val runtime = ServicePluginSession(refreshContext { listOf(next) }, pkg, "account", requestConfirmation = { _, _, _ -> prompts++; false })
-        runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession(remember = true, includeReadState = true)
+        runtime.academicAuthorizationDescription(); runtime.authorizeAcademicSession(remember = true)
         val before = server.requestCount
-        for (bad in listOf(seen("unapproved-target"), seen().apply { getJSONObject("form").put("payload", secret) },
-            seen().apply { remove("form"); put("body", "id=one") }, request("/jw/api/unknown"),
-            request("/jw/api/submit").put("method", "POST").put("purpose", "mutation"), request("/jw/api/submit").put("method", "POST"))) {
+        for (allowed in listOf(seen("new-target"), seen().apply { remove("form"); put("body", "{\"id\":\"one\"}") }, request("/jw/api/unknown"))) {
+            next = allowed; server.enqueue(MockResponse().setBody("{\"text\":\"ok\"}"))
+            assertEquals("ok", runtime.page("main").getString("title"))
+        }
+        for (bad in listOf(request().put("url", "https://foreign.example/jw/api/seen"), request("/jw/api/login"), request("/jw/api/%6cogin"), request("/jw/api/%256cogin"))) {
             next = bad
             assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }
         }
-        assertEquals(before, server.requestCount)
-        // Unknown and high-risk calls still require individual approval; malformed
-        // bodies, invalid parameters and a forged query purpose fail before any prompt.
-        assertEquals(2, prompts)
+        assertEquals(before + 3, server.requestCount); assertEquals(0, prompts)
         next = seen(); server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/jw/api/submit"))
         assertEquals(AcademicStatus.RESULT_UNKNOWN, assertThrows(AcademicException::class.java) { runBlocking { runtime.page("main") } }.status)
-        assertEquals(before + 1, server.requestCount); runtime.close()
+        assertEquals(before + 4, server.requestCount); runtime.close()
     }
 
     @Test fun simultaneousNativeLoginRequestsShareOnePromptAndReadStateEffectsReuseIt() = runBlocking {
@@ -280,7 +280,7 @@ class PluginAcademicTokenTest {
         val ui = object : NativePluginInteraction by interaction {
             override suspend fun consent(title: String, message: String) = choose("$title\n$message", NativePluginInteraction.CONSENT_CHOICES)
             override suspend fun choose(title: String, choices: List<Pair<String, String>>): String? {
-                prompts++; assertTrue(title.contains("Synthetic seen")); delay(20); return "remember"
+                prompts++; assertTrue(title.contains("学校站点")); delay(20); return "remember"
             }
             override suspend fun confirm(title: String, message: String): Boolean { prompts++; return false }
         }

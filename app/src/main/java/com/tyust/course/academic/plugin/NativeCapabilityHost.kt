@@ -15,8 +15,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.tyust.course.academic.AcademicSession
 import kotlinx.coroutines.*
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import okhttp3.Cookie
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
@@ -56,7 +54,6 @@ class NativeCapabilityHost(
     private val vault = NativePluginVault(app, namespace, legacyNamespaces) { ensureActive() }
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val operations = ConcurrentHashMap.newKeySet<PluginOperation>()
-    private val academicConsent = Mutex()
     private val descriptors = PluginJson.objects(JSONArray(app.assets.open("academic-plugin/host-capabilities.json").bufferedReader().use { it.readText() }))
     private val schema = PluginSchema(JSONObject())
     private val prefs = app.getSharedPreferences("native-plugin-permissions", Context.MODE_PRIVATE)
@@ -80,8 +77,21 @@ class NativeCapabilityHost(
     private fun denied(message: String): Nothing = throw PluginException(PluginErrorCode.PERMISSION_DENIED, message)
     private suspend fun confirm(flow: NativeFlow, title: String, message: String) {
         if (!flow.userGesture || interaction == null) denied("此操作需要你主动确认")
-        if (!withContext(Dispatchers.Main) { interaction.confirm(title, message) }) throw PluginException(PluginErrorCode.CANCELLED, "你已取消此操作")
+        if (!PluginExecutionBudget.userInput { withContext(Dispatchers.Main) { interaction.confirm(title, message) } }) throw PluginException(PluginErrorCode.CANCELLED, "你已取消此操作")
         ensureActive()
+    }
+    private suspend fun authorizeAcademic(flow: NativeFlow): JSONObject = PluginExecutionBudget.userInput {
+        PluginConsentCoordinator.request(academicSession.coordinationKey()) {
+            if (academicSession.siteAuthorized()) academicSession.authorize()
+            else {
+                if (!flow.userGesture || interaction == null) denied("请主动授权此插件使用学校登录")
+                val description = academicSession.description()
+                val choice = withContext(Dispatchers.Main) { interaction.consent("授权使用教务登录", description) }
+                ensureActive()
+                if (choice !in setOf("once", "remember")) throw PluginException(PluginErrorCode.CANCELLED, "已拒绝授权")
+                academicSession.authorizeSite(choice == "remember")
+            }
+        }
     }
     suspend fun execute(effect: JSONObject, flow: NativeFlow): Any? {
         ensureActive()
@@ -89,29 +99,16 @@ class NativeCapabilityHost(
         val descriptor = PluginJson.objects(capabilities()).firstOrNull { it.getString("name") == name && effect.getInt("version") in 1..it.getInt("version") }
             ?: throw PluginException(PluginErrorCode.UNSUPPORTED, "宿主未提供此版本的能力：$name")
         if (descriptor.getString("permission") !in pkg.manifest.permissions) denied("插件未声明 ${descriptor.getString("permission")} 权限")
-        if (descriptor.getBoolean("userGesture") && !flow.userGesture) denied("此设备交互必须由你发起")
+        if (descriptor.getBoolean("userGesture") && !flow.userGesture && !(name == "academic.session.authorize" && academicSession.siteAuthorized())) denied("此设备交互必须由你发起")
         val input = effect.getJSONObject("input")
         schema.validate(input, descriptor.getJSONObject("input"))
         val request = when (name) { "network.request" -> input; "files.download", "files.upload" -> input.getJSONObject("request"); else -> null }
         if (request != null && PluginCredentialBindings.structured(request) &&
             (effect.getInt("version") < 2 || PluginJson.objects(pkg.manifest.json.optJSONArray("requires") ?: JSONArray()).none { it.optString("name") == name && it.optInt("version") >= 2 }))
             throw PluginException(PluginErrorCode.UNSUPPORTED, "加密凭据绑定需要声明并调用 $name 版本 2")
-        val result = withTimeout(effect.optLong("timeoutMs", 120_000).coerceIn(1000, 600_000)) {
+        val result = PluginExecutionBudget.run(effect.optLong("timeoutMs", 120_000).coerceIn(1000, 600_000)) {
             when (name) {
-                "academic.session.authorize" -> academicConsent.withLock {
-                    val description = academicSession.description()
-                    var remember = false
-                    var includeReadState = false
-                    if (!academicSession.authorized()) {
-                        if (!flow.userGesture || interaction == null) denied("此操作需要你主动确认")
-                        val choice = withContext(Dispatchers.Main) { interaction.consent("授权使用教务登录", description) }
-                        ensureActive()
-                        if (choice !in setOf("once", "remember")) throw PluginException(PluginErrorCode.CANCELLED, "已拒绝授权")
-                        remember = choice == "remember"
-                        includeReadState = true
-                    }
-                    academicSession.authorize(remember, includeReadState)
-                }
+                "academic.session.authorize" -> authorizeAcademic(flow)
                 "privacy.status" -> dataGuard.status()
                 "privacy.revoke" -> { dataGuard.revoke(); JSONObject.NULL }
                 "academic.session.revoke" -> { PluginAcademicSession.revoke(app, pkg.manifest.id); JSONObject.NULL }
@@ -125,20 +122,9 @@ class NativeCapabilityHost(
                     val request = input.getJSONObject("request")
                     val mutation = request.getString("purpose") == "mutation"
                     val url = request.getString("url").toHttpUrlOrNull() ?: throw PluginException(PluginErrorCode.UNTRUSTED_URL, "地址无效")
+                    academicSession.requireSiteDestination(url, request.optString("method", "GET"), request.getString("purpose"))
+                    if (!academicSession.siteAuthorized()) authorizeAcademic(flow)
                     academicSession.requireRequest(grant, url, request.optString("method", "GET"), request.getString("purpose"), request.optJSONObject("form"))
-                    val operationRule = academicSession.operation(request)
-                    academicConsent.withLock {
-                        if (mutation && operationRule?.optString("risk") == "read-state") {
-                            if (!academicSession.operationAuthorized(operationRule)) {
-                                if (!flow.userGesture || interaction == null) denied("此操作需要确认")
-                                val choice = withContext(Dispatchers.Main) { interaction.consent(operationRule.getString("title"),
-                                    "允许此已审核的状态更新？记住后，刷新时不再重复询问。\n${operationRule.getString("method")} ${operationRule.getString("origin")}${operationRule.getString("path")}\n仅适用于当前账号、此端点及其审核过的参数范围。") }
-                                ensureActive()
-                                if (choice !in setOf("once", "remember")) throw PluginException(PluginErrorCode.CANCELLED, "已取消")
-                                if (choice == "remember") academicSession.rememberOperation(operationRule)
-                            }
-                        } else if (mutation || operationRule?.optString("risk") != "read") confirm(flow, if (mutation) "确认提交" else "确认未审核端点", "${pkg.manifest.name} 将使用当前教务账号向 ${request.getString("url")} 提交数据。")
-                    }
                     dataGuard.mark()
                     callHost("http", request, mutation, flow = flow, shared = academicSession, grant = grant, shareToken = effect.getInt("version") >= 2)
                 }
@@ -163,7 +149,7 @@ class NativeCapabilityHost(
                 "auth.prompt" -> {
                     val fields = PluginJson.objects(input.getJSONArray("fields"))
                     if (fields.map { it.getString("id") }.distinct().size != fields.size) throw PluginException(PluginErrorCode.VALIDATION_FAILED, "认证字段 ID 重复")
-                    val values = withContext(Dispatchers.Main) { interaction!!.authenticate(input, input.optString("imageHandle").takeIf { it.isNotBlank() }?.let(files::file)) }
+                    val values = PluginExecutionBudget.userInput { withContext(Dispatchers.Main) { interaction!!.authenticate(input, input.optString("imageHandle").takeIf { it.isNotBlank() }?.let(files::file)) } }
                         ?: throw PluginException(PluginErrorCode.CANCELLED, "已取消认证")
                     ensureActive()
                     withContext(Dispatchers.IO) { JSONObject().put("credential", vault.saveCredential(input.getString("key"), values.getJSONObject("values"), values.optBoolean("remember"))) }
@@ -209,12 +195,11 @@ class NativeCapabilityHost(
                 }
                 "files.open", "files.share" -> {
                     val handle = input.getString("handle"); val info = files.info(handle)
-                    confirm(flow, if (name == "files.share") "分享文件" else "打开文件", "${pkg.manifest.name} 请求将 ${info.getString("name")} 交给你选择的应用")
                     val uri = FileProvider.getUriForFile(app, app.packageName + ".fileprovider", files.file(handle))
                     val intent = if (name == "files.share") Intent(Intent.ACTION_SEND).setType(info.getString("mime")).putExtra(Intent.EXTRA_STREAM, uri)
                         else Intent(Intent.ACTION_VIEW).setDataAndType(uri, info.getString("mime"))
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).setClipData(ClipData.newRawUri("文件", uri))
-                    withContext(Dispatchers.Main) { app.startActivity(Intent.createChooser(intent, "选择应用").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }; JSONObject.NULL
+                    withContext(Dispatchers.Main) { app.startActivity(Intent.createChooser(intent, "${info.getString("name")} · 选择接收应用").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }; JSONObject.NULL
                 }
                 "device.clipboard.read" -> {
                     confirm(flow, "读取剪贴板", "允许 ${pkg.manifest.name} 读取当前剪贴板文字？")
@@ -317,12 +302,13 @@ class NativeCapabilityHost(
             val lease = PluginVersionLeases.acquire(pkg.manifest.id)
             try {
                 val host = PluginHost(operation, File(app.filesDir, "academic-plugin-storage"), shared?.cookies(grant) ?: PluginWebSessionCookies.jar(app, pkg, session, active),
+                    sharedSite = { shared?.siteAuthorized() == true },
                     sharedApproval = shared?.let { access -> { request ->
                         // Initial request was confirmed/classified before entering this worker.
                         // A redirect must not inherit consent for a different unreviewed endpoint.
-                        if (request.getString("url") != input.getString("url") && access.operation(request)?.optString("risk") != "read")
+                        if (!access.siteAuthorized() && request.getString("url") != input.getString("url") && access.operation(request)?.optString("risk") != "read")
                             throw PluginException(PluginErrorCode.PERMISSION_DENIED, "跳转后的端点未经审核，请单独确认")
-                        false // Native effects already carry their individual mutation confirmation.
+                        access.siteAuthorized() && request.getString("purpose") == "mutation"
                     } },
                     sharedToken = if (shareToken) shared?.let { access -> { url -> access.tokenHeader(grant, url) } } else null,
                     sharedRequest = shared?.let { access -> { url, verb, purpose, form -> access.requireRequest(grant, url, verb, purpose, form) } }, dataGuard = dataGuard)

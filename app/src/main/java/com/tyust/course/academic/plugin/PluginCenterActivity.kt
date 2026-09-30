@@ -444,6 +444,7 @@ class PluginCenterActivity : ComponentActivity() {
                         TextButton(onClick = { web(PluginSourceDetails.page(pkg)) }) { Text("本版本源码与参与修改") }
                     }
                         val security = PluginDataGuard(this@PluginCenterActivity, pkg)
+                        Detail("审核", if (pkg.bundled) "App 内置" else if (PluginReviewProof.reviewed(pkg)) "此包已有绑定摘要的人工审核记录" else "未取得此包的审核凭证；用户信任按包记住")
                         Detail("个人数据", if (security.sensitive()) "已接触个人数据；外传需独立授权" else "尚未读取受保护学业数据")
                         PluginJson.objects(security.status().getJSONArray("destinations")).forEach { destination ->
                             Detail(destination.getString("origin"), if (destination.getBoolean("authorized")) "已授权 · ${destination.getString("purpose")}" else "未授权")
@@ -488,14 +489,14 @@ class PluginCenterActivity : ComponentActivity() {
                         Text(if (AcademicProviderRegistry.isEnabled(pkg.manifest.id)) "停用所有入口与任务" else "启用插件")
                     }
                     TextButton(onClick = { PluginFeedback.open(this@PluginCenterActivity, pkg) }) { Text("快捷反馈") }
-                    TextButton(onClick = { selected = null; uninstall = pkg }) { Text("卸载插件", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = { selected = null; uninstall = pkg }) { Text(if (AcademicProviderRegistry.installedOverride(pkg)) "卸载插件" else "停用内置插件", color = MaterialTheme.colorScheme.error) }
                 }
             }
         }
-        uninstall?.let { pkg -> SystemDialog(onDismissRequest = { uninstall = null }, title = { Text("卸载 ${pkg.manifest.name}？") },
-            confirmButton = { TextButton(onClick = { run { withContext(Dispatchers.IO) { AcademicProviderRegistry.packages().deactivate(pkg.manifest.id) }; refresh(); generation++ }; uninstall = null }) { Text("卸载") } },
+        uninstall?.let { pkg -> SystemDialog(onDismissRequest = { uninstall = null }, title = { Text(if (AcademicProviderRegistry.installedOverride(pkg)) "卸载 ${pkg.manifest.name}？" else "停用 ${pkg.manifest.name}？") },
+            confirmButton = { TextButton(onClick = { run { withContext(Dispatchers.IO) { AcademicProviderRegistry.removePlugin(pkg) }; refresh(); generation++ }; uninstall = null }) { Text("卸载") } },
             dismissButton = { TextButton(onClick = { uninstall = null }) { Text("取消") } }) {
-            Text("将移除页面、账号授权并停止后续任务。已提交结果和服务器业务数据保留。仅想在当前学校关闭时，请使用“本校停用”。")
+            Text(AcademicProviderRegistry.removalDescription(pkg))
         } }
     }
     @OptIn(ExperimentalLayoutApi::class)

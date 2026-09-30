@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap
 /** No application data, sockets, native modules or filesystem bindings are exposed to JS. */
 class PluginSandboxService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val sdk by lazy { assets.open("academic-plugin/host-sdk.js").bufferedReader().use { it.readText() } }
     private val jobs = ConcurrentHashMap<String, Job>()
     private val binder = object : IPluginSandbox.Stub() {
         override fun execute(input: ParcelFileDescriptor, host: IPluginHost, callback: IPluginResult) {
@@ -47,7 +48,9 @@ class PluginSandboxService : Service() {
     }
 
     private suspend fun runEngine(request: JSONObject, host: IPluginHost): String = withTimeout(PluginLimits.WALL_MILLIS) {
+        val start = android.os.SystemClock.elapsedRealtime()
         val engine = QuickJs.create(Dispatchers.IO)
+        android.util.Log.i("PluginSandbox", "phase=engine_ready elapsedMs=${android.os.SystemClock.elapsedRealtime() - start}")
         try {
             engine.memoryLimit = PluginLimits.MEMORY_BYTES
             engine.maxStackSize = PluginLimits.STACK_BYTES
@@ -76,11 +79,10 @@ class PluginSandboxService : Service() {
                 }
             }
             // One evaluation covers bootstrap, plugin initialization and invocation under one JS budget.
-            val sdk = assets.open("academic-plugin/host-sdk.js").bufferedReader().use { it.readText() }
             val source = request.getString("source")
             val invoke = JSONObject(request.toString()).apply { remove("source") }
             engine.evaluate<Unit>(sdk + "\n;" + source + "\n;__zfInvoke(" + invoke.toString() + ").then(__zfResult);void 0;", "plugin.js")
-            completion.await()
+            completion.await().also { android.util.Log.i("PluginSandbox", "phase=engine_done elapsedMs=${android.os.SystemClock.elapsedRealtime() - start}") }
         } finally { engine.close() }
     }
 

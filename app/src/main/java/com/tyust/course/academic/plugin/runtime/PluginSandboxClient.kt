@@ -8,13 +8,12 @@ import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
 
-class PluginSandboxClient(context: Context, private val startupTimeoutMillis: Long = 10_000) {
+class PluginSandboxClient(context: Context, private val startupTimeoutMillis: Long = 10_000, private val idleTimeoutMillis: Long = 30_000) {
     private val application = context.applicationContext
 
     suspend fun execute(source: String, args: JSONObject, operation: PluginOperation, host: PluginHost): JSONObject = coroutineScope {
         operation.requireActive()
         val scope = this
-        val connected = CompletableDeferred<IPluginSandbox>()
         val result = CompletableDeferred<String>()
         val accepting = AtomicBoolean(true)
         val received = AtomicBoolean(false)
@@ -24,29 +23,20 @@ class PluginSandboxClient(context: Context, private val startupTimeoutMillis: Lo
         var phase = "binding"
         fun diagnostic(outcome: String) {
             val now = SystemClock.elapsedRealtime()
-            Log.i("PluginSandbox", "phase=$phase outcome=$outcome phaseMs=${now - phaseStartedAt} totalMs=${now - startedAt}")
+            Log.i("PluginSandbox", "api=${Build.VERSION.SDK_INT} version=${operation.manifest.version} phase=$phase outcome=$outcome phaseMs=${now - phaseStartedAt} totalMs=${now - startedAt}")
         }
         fun disconnected(message: String) {
             if (!accepting.get()) return
             val error = operation.failure(PluginErrorCode.RUNTIME_EXITED, message)
-            connected.completeExceptionally(error)
             result.completeExceptionally(error)
         }
-        val connection = object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-                if (accepting.get()) connected.complete(IPluginSandbox.Stub.asInterface(binder))
-            }
-            override fun onServiceDisconnected(name: ComponentName) = disconnected("插件进程已退出，请重试")
-            override fun onNullBinding(name: ComponentName) = disconnected("插件进程启动失败：服务未提供连接")
-            override fun onBindingDied(name: ComponentName) = disconnected("插件服务连接已失效，请重试")
-        }
-        var bound = false
+        var connectionLease: PluginSandboxConnections.Lease? = null
         var sandbox: IPluginSandbox? = null
         try {
             withTimeout(PluginLimits.WALL_MILLIS) {
-                bound = application.bindService(Intent(application, PluginSandboxService::class.java), connection, Context.BIND_AUTO_CREATE)
-                if (!bound) throw operation.failure(PluginErrorCode.RUNTIME_EXITED, "插件进程启动失败：无法绑定服务")
-                sandbox = withTimeout(startupTimeoutMillis) { connected.await() }
+                val lease = PluginSandboxConnections.acquire(application, idleTimeoutMillis, ::disconnected)
+                connectionLease = lease
+                sandbox = withTimeout(startupTimeoutMillis) { lease.ready.await() }
                 diagnostic("connected")
                 operation.requireActive()
                 val bridge = object : IPluginHost.Stub() {
@@ -106,6 +96,7 @@ class PluginSandboxClient(context: Context, private val startupTimeoutMillis: Lo
         } catch (e: TimeoutCancellationException) {
             // An outer deadline must remain caller cancellation.
             currentCoroutineContext().ensureActive()
+            if (phase == "binding") connectionLease?.invalidate("插件进程启动超时，请重试")
             diagnostic("timeout")
             throw if (phase == "binding") operation.failure(PluginErrorCode.RUNTIME_EXITED, "插件进程启动超时，请重试")
                 else operation.failure(PluginErrorCode.TIMEOUT, "插件执行超时，请重试")
@@ -131,8 +122,7 @@ class PluginSandboxClient(context: Context, private val startupTimeoutMillis: Lo
             // The caller owns the operation through response validation/publication.
             // This client only retires its Binder connection and transport resources.
             runCatching { sandbox?.cancel(operation.id) }
-            if (bound) runCatching { application.unbindService(connection) }
-            connected.cancel()
+            connectionLease?.close()
             result.cancel()
         }
     }

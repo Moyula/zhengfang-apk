@@ -806,6 +806,25 @@
       "type": "string",
       "maxLength": 2000
     },
+    "academicSharing": {
+      "type": "object",
+      "properties": {
+        "origins": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "uniqueItems": true,
+          "maxItems": 12
+        }
+      },
+      "required": [
+        "origins"
+      ],
+      "additionalProperties": false
+    },
     "dataDisclosure": {
       "type": "array",
       "maxItems": 20,

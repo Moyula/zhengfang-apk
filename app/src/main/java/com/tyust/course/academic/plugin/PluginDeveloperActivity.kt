@@ -47,6 +47,7 @@ class PluginDeveloperActivity : ComponentActivity() {
         var catalogUrl by remember { mutableStateOf("http://127.0.0.1:8787/catalog.json") }
         var catalogKey by remember { mutableStateOf("") }
         var catalogEntries by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+        var uninstall by remember { mutableStateOf<PluginPackage?>(null) }
         var bindCandidate by remember { mutableStateOf<PluginPackage?>(null) }
         val sessions = remember { AcademicSessionStore() }
         val sessionId = remember { "dev:${UUID.randomUUID()}" }
@@ -129,7 +130,7 @@ class PluginDeveloperActivity : ComponentActivity() {
                 val current = school?.let { runCatching { AcademicProviderRegistry.resolve(it) }.getOrNull() }
                 InsetGroupedSection(header = "当前学校") {
                     InsetGroupedRow(title = school?.name ?: "尚未选择学校", icon = Icons.Outlined.School,
-                        subtitle = current?.let { "${it.manifest.name} · ${it.manifest.version}" } ?: "内置适配 · 无需额外安装",
+                        subtitle = current?.let { "${it.manifest.name} · ${it.manifest.version}" } ?: if (school?.academicProvider == "unconfigured") "未配置适配" else "内置适配 · 无需额外安装",
                         showDivider = false)
                 }
                 InsetGroupedSection(header = "获取插件", footer = if (AcademicProviderRegistry.usingLocalCatalog) "当前使用本地调试目录，重启应用后恢复正式目录。" else "正式目录已启用，下载与更新均会校验签名。") {
@@ -205,17 +206,15 @@ class PluginDeveloperActivity : ComponentActivity() {
                                 catch (e: Exception) { feedback = e.message.orEmpty() }
                                 finally { busy = false }
                             } }, trailing = { ForwardIcon() })
-                        if (pkg.manifest.isService || pkg.manifest.isNative) InsetGroupedRow(title = "卸载此插件", icon = Icons.Outlined.Close, enabled = !busy, showDivider = false,
-                            onClick = { AcademicProviderRegistry.packages().deactivate(pkg.manifest.id); AcademicProviderRegistry.reload(); selected = null; scope.launch { refresh() }; feedback = "已停用校园服务" })
-                        else InsetGroupedRow(title = "恢复内置适配", icon = Icons.Outlined.Restore, enabled = !busy, showDivider = false,
-                            onClick = {
-                                val boundSchool = UserManager.getInstance().getSchoolById(pkg.manifest.school.getString("id"))
-                                if (boundSchool != null && pkg.manifest.baseProvider != null) {
-                                    boundSchool.academicProvider = pkg.manifest.baseProvider
-                                    UserManager.getInstance().updateSchoolConfig(boundSchool)
-                                    feedback = "已恢复内置适配，请重新登录"
-                                } else feedback = "此学校暂无内置适配"
-                            }, trailing = { ForwardIcon() })
+                        if (AcademicProviderRegistry.hasBuiltinFallback(pkg)) InsetGroupedRow(title = "恢复内置适配", icon = Icons.Outlined.Restore, enabled = !busy,
+                            onClick = { scope.launch {
+                                busy = true
+                                try { withContext(Dispatchers.IO) { AcademicProviderRegistry.restoreBuiltin(pkg) }; refresh(); selected = null; feedback = "已恢复内置适配，请重新登录" }
+                                catch (e: Exception) { feedback = e.message.orEmpty() }
+                                finally { busy = false }
+                            } }, trailing = { ForwardIcon() })
+                        InsetGroupedRow(title = if (AcademicProviderRegistry.installedOverride(pkg)) "卸载此插件" else "停用内置插件",
+                            icon = Icons.Outlined.Close, enabled = !busy, showDivider = false, onClick = { uninstall = pkg })
                     }
                 }
                 InsetGroupedSection(header = "开发者工具", footer = if (developer) "开发模式允许导入未签名的本地包，请仅使用可信来源。" else null) {
@@ -272,6 +271,17 @@ class PluginDeveloperActivity : ComponentActivity() {
             content = { Text("此操作会执行所选插件接口。模拟插件只修改模拟数据，真实服务可能改变账号记录。") },
             confirmButton = { TextButton({ confirmWrite = false; runOperation(true) }) { Text("确认执行") } },
             dismissButton = { TextButton({ confirmWrite = false }) { Text("取消") } })
+        uninstall?.let { pkg -> SystemDialog(onDismissRequest = { uninstall = null }, title = { Text(if (AcademicProviderRegistry.installedOverride(pkg)) "卸载 ${pkg.manifest.name}？" else "停用 ${pkg.manifest.name}？") },
+            confirmButton = { TextButton(onClick = { uninstall = null; scope.launch {
+                busy = true
+                try { val installed = AcademicProviderRegistry.installedOverride(pkg)
+                    withContext(Dispatchers.IO) { AcademicProviderRegistry.removePlugin(pkg) }; refresh(); selected = null
+                    feedback = if (installed) "已卸载插件" else "已停用内置插件"
+                } catch (e: Exception) { feedback = e.message.orEmpty() } finally { busy = false }
+            } }) { Text("确认") } }, dismissButton = { TextButton({ uninstall = null }) { Text("取消") } }) {
+                Text(AcademicProviderRegistry.removalDescription(pkg))
+            }
+        }
         bindCandidate?.let { pkg -> SystemDialog(onDismissRequest = { bindCandidate = null }, title = { Text("使用 ${pkg.manifest.name}") },
             content = { Text("将此适配添加到学校列表，之后可在登录页选择。已有学校和账号 ID 保持不变。") },
             confirmButton = { TextButton({

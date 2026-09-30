@@ -28,7 +28,7 @@ object NativePluginRunner {
         val host = PluginHost(operation, File(app.filesDir, "academic-plugin-storage"), PluginWebSessionCookies.jar(app, pkg, session, active), dataGuard = PluginDataGuard(app, pkg))
         val result = PluginSandboxClient(app).execute(pkg.source, args, operation, host)
         operation.requireActive()
-        val schema = PluginSchema(PluginJson.parse(app.assets.open("academic-plugin/contract.schema.json").bufferedReader().use { it.readText() }))
+        val schema = PluginContractCache.schema(app)
         return schema.response(method, result).also { if (method in setOf("ui.init", "ui.reduce", "task.run")) NativePluginContract.validateResult(it, method == "task.run") }
         } finally { operation.close(); lease.close() }
     }
@@ -41,7 +41,7 @@ class NativeUiSession(
     private val app: Context, val pkg: PluginPackage, private val session: AcademicSession,
     val host: NativeCapabilityHost, private val active: () -> Boolean
 ) {
-    private data class Pending(val instance: String, val event: JSONObject, val flow: NativeFlow, val init: Boolean = false, val params: JSONObject = JSONObject())
+    private data class Pending(val instance: String, val event: JSONObject, val flow: NativeFlow, val init: Boolean = false, val params: JSONObject = JSONObject(), val queuedAt: Long = android.os.SystemClock.elapsedRealtime())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val events = Channel<Pending>(64)
     private val queuedInputs = mutableMapOf<String, Pending>()
@@ -50,12 +50,14 @@ class NativeUiSession(
     val snapshot = mutableSnapshot.asStateFlow()
     private var state: Any? = JSONObject()
     private var templateId = ""
+    private val sandboxConnection = com.tyust.course.academic.plugin.runtime.PluginSandboxConnections.acquire(app)
     private var closed = false
     init {
         host.cancelEffects = { ids -> ids.forEach { effects[it]?.cancel() } }
         scope.launch {
             for (pending in events) {
                 if (!isCurrent(pending.instance)) continue
+                android.util.Log.i("PluginUi", "version=${pkg.manifest.version} phase=queue_done elapsedMs=${android.os.SystemClock.elapsedRealtime() - pending.queuedAt}")
                 queuedInputs.entries.removeAll { it.value === pending }
                 val before = mutableSnapshot.value
                 mutableSnapshot.value = before.copy(busy = true)
@@ -135,5 +137,5 @@ class NativeUiSession(
         mutableSnapshot.value = mutableSnapshot.value.copy(busy = false, error = error.message ?: "插件暂时不可用", errorCode = (error as? PluginException)?.code?.name ?: "RUNTIME_EXITED")
     }
     private fun isCurrent(instance: String): Boolean = !closed && active() && !session.retired && mutableSnapshot.value.instance == instance
-    fun close() { closed = true; events.close(); effects.values.toList().forEach(Job::cancel); scope.cancel(); host.close(); session.retire() }
+    fun close() { sandboxConnection.close(); closed = true; events.close(); effects.values.toList().forEach(Job::cancel); scope.cancel(); host.close(); session.retire() }
 }

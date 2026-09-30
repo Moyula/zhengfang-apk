@@ -127,7 +127,8 @@ class ServicePluginActivity : ComponentActivity() {
         val dataGuard = remember(runtime) { PluginDataGuard(this@ServicePluginActivity, pkg) }
         var pendingDisclosure by remember { mutableStateOf<String?>(null) }
         var pendingAction by remember { mutableStateOf<JSONObject?>(null) }
-        var pendingAcademicAuthorization by remember { mutableStateOf<String?>(null) }
+        var pendingAcademicAuthorization by remember { mutableStateOf<Pair<String, CompletableDeferred<String?>>?>(null) }
+        DisposableEffect(runtime) { onDispose { pendingAcademicAuthorization?.second?.complete(null) } }
         var editing by remember { mutableStateOf(false) }
         var layoutRevision by remember { mutableIntStateOf(0) }
         val layout = remember { ServicePageLayout(this, openedScope.orEmpty() + ":" + pkg.manifest.id) }
@@ -205,12 +206,14 @@ class ServicePluginActivity : ComponentActivity() {
                     InsetGroupedSection(header = "使用本校教务登录", footer = "记住授权后，关闭页面或同账号重登无需再次确认。可在插件详情中撤销。") {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                             Text("使用已登录的教务账号，无需再次输入密码。教务登录过期时，请先重新登录本校账号。")
-                            LiquidButton({
-                                try {
-                                    if (runtime.restoreAcademicAuthorization()) load(history.last().first, history.last().second)
-                                    else pendingAcademicAuthorization = runtime.academicAuthorizationDescription()
+                            LiquidButton({ run {
+                                runtime.ensureAcademicAuthorization { description ->
+                                    val answer = CompletableDeferred<String?>()
+                                    pendingAcademicAuthorization = description to answer
+                                    try { answer.await() } finally { pendingAcademicAuthorization = null }
                                 }
-                                catch (e: Exception) { message = e.message ?: "无法取得本校登录会话" }
+                                page = withContext(Dispatchers.IO) { runtime.page(history.last().first, history.last().second) }
+                            }
                             }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("service-academic-authorize"), style = LiquidButtonStyle.Tinted) { Text("授权使用本校登录") }
                         }
                     }
@@ -299,20 +302,12 @@ class ServicePluginActivity : ComponentActivity() {
                     } catch (e: Exception) { message = e.message.orEmpty() }
                 }) { Text("允许此网站") } }, dismissButton = { TextButton({ pendingDisclosure = null }) { Text("拒绝") } })
         }
-        pendingAcademicAuthorization?.let { description ->
-            SystemDialog(onDismissRequest = { pendingAcademicAuthorization = null }, title = { Text("授权使用教务登录") },
-                content = { Text(description) },
-                confirmButton = { Row {
-                    TextButton({ pendingAcademicAuthorization = null; run {
-                        runtime.authorizeAcademicSession(false, includeReadState = true)
-                        page = withContext(Dispatchers.IO) { runtime.page(history.last().first, history.last().second) }
-                    } }) { Text("仅本次") }
-                    TextButton({ pendingAcademicAuthorization = null; run {
-                        runtime.authorizeAcademicSession(true, includeReadState = true)
-                        page = withContext(Dispatchers.IO) { runtime.page(history.last().first, history.last().second) }
-                    } }) { Text("允许并记住") }
-                } },
-                dismissButton = { TextButton({ pendingAcademicAuthorization = null }) { Text("取消") } })
+        pendingAcademicAuthorization?.let { (description, answer) ->
+            SystemDialog(onDismissRequest = { answer.complete(null) }, title = { Text("授权使用教务登录") },
+                content = { Text(description) }, confirmButton = { Row {
+                    TextButton({ answer.complete("once") }) { Text("仅本次") }
+                    TextButton({ answer.complete("remember") }) { Text("允许并记住") }
+                } }, dismissButton = { TextButton({ answer.complete(null) }) { Text("拒绝") } })
         }
         pendingAction?.let { action ->
             val declaration = ServicePluginContract.action(pkg.manifest, action.getString("actionId"))

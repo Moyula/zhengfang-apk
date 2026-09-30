@@ -649,7 +649,7 @@
   },
   {
     "name": "academic.session.authorize",
-    "version": 1,
+    "version": 2,
     "permission": "academic.session",
     "input": {
       "type": "object",
