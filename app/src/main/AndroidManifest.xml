@@ -91,10 +91,11 @@
         <activity android:name=".academic.plugin.CampusServiceCenterActivity" android:exported="false" android:configChanges="uiMode" />
         <activity android:name=".academic.plugin.ServicePluginActivity" android:exported="false" android:configChanges="uiMode" />
         <!-- Background grab service -->
+        <!-- #30/#50: keep a private separate process; isolated UID startup fails on some OEMs.
+             QuickJS/host checks remain, but this no longer provides OS-level UID isolation. -->
         <service
             android:name=".academic.plugin.runtime.PluginSandboxService"
             android:process=":academic_plugin"
-            android:isolatedProcess="true"
             android:exported="false" />
         <service
             android:name=".service.GrabService"

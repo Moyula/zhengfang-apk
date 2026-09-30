@@ -156,11 +156,12 @@ class PluginSandboxBindingTest {
         a.close(); b.close(); c.close(); assertEquals(2, context.unbound)
     }
 
-    @Test fun privateServiceUsesAnIsolatedUidAndIsNotExported() {
+    @Test fun privateServiceKeepsSeparateProcessWithoutIsolatedUidForOemCompatibility() {
         val info = app.packageManager.getServiceInfo(ComponentName(app, PluginSandboxService::class.java), 0)
         assertEquals(app.packageName + ":academic_plugin", info.processName)
         assertFalse(info.exported)
-        assertEquals(ServiceInfo.FLAG_ISOLATED_PROCESS, info.flags and ServiceInfo.FLAG_ISOLATED_PROCESS)
+        // #30/#50: the isolated UID launch path can be killed before service publication.
+        assertEquals(0, info.flags and ServiceInfo.FLAG_ISOLATED_PROCESS)
     }
     @Test fun failedBindDoesNotExecuteOrUnbindANonexistentConnection() = runTest {
         val context = BindingContext(app) { false }

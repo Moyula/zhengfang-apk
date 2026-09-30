@@ -13,7 +13,8 @@ import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 
-/** No application data, sockets, native modules or filesystem bindings are exposed to JS. */
+/** JS has no direct data/socket/native/filesystem bindings. The separate process shares the
+ * app UID for #30/#50 compatibility: these engine restrictions are not OS-level isolation. */
 class PluginSandboxService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val sdk by lazy { assets.open("academic-plugin/host-sdk.js").bufferedReader().use { it.readText() } }
