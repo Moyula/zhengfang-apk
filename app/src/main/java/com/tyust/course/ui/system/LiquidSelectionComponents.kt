@@ -1104,7 +1104,8 @@ fun LiquidPicker(
     onAction: (() -> Unit)? = null,
     backdrop: Backdrop? = LocalControlBackdrop.current,
     maxLabelLines: Int = 1,
-    maxSelectedLabelLines: Int = maxLabelLines
+    maxSelectedLabelLines: Int = maxLabelLines,
+    popupWidth: Dp? = null
 ) {
     var expanded by remember { mutableStateOf(false) }
     var actionPending by remember { mutableStateOf(false) }
@@ -1132,6 +1133,7 @@ fun LiquidPicker(
     val headerPressed by headerInteraction.collectIsPressedAsState()
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
+    var anchorWidth by remember { mutableStateOf(0.dp) }
     val labelLines = maxLabelLines.coerceIn(1, 3)
     val selectedLabelLines = maxSelectedLabelLines.coerceIn(1, 3)
     val headerHeight = maxOf(PickerHeaderHeight,
@@ -1420,7 +1422,14 @@ fun LiquidPicker(
             portalBodySpace = with(density) { space.toDp() }
             portalOpensUp = up
         },
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth().onGloballyPositioned {
+            anchorWidth = with(density) { it.size.width.toDp() }
+        },
+        popupWidth = popupWidth?.let { width ->
+            val start = anchorWidth.takeIf { it > 0.dp } ?: width
+            // Use the existing motion so a compact trigger grows into the full readable menu.
+            start + (maxOf(start, width) - start) * smoothStep(settledProgress)
+        }
     ) {
     ProvideWallpaperAppearance(appearance) {
     Box(

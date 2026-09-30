@@ -706,7 +706,8 @@ fun SystemPicker(
     onAction: (() -> Unit)? = null,
     backdrop: Backdrop? = LocalControlBackdrop.current,
     maxLabelLines: Int = 1,
-    maxSelectedLabelLines: Int = maxLabelLines
+    maxSelectedLabelLines: Int = maxLabelLines,
+    popupWidth: Dp? = null
 ) {
     LiquidPicker(
         options = options.map(::LiquidPickerOption),
@@ -721,7 +722,8 @@ fun SystemPicker(
         onAction = onAction,
         backdrop = backdrop,
         maxLabelLines = maxLabelLines,
-        maxSelectedLabelLines = maxSelectedLabelLines
+        maxSelectedLabelLines = maxSelectedLabelLines,
+        popupWidth = popupWidth
     )
 }
 

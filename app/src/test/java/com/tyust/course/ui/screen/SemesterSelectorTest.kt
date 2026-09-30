@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -26,24 +27,42 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [32], application = Application::class)
+@Config(sdk = [32], application = Application::class, qualifiers = "w411dp-h891dp")
 class SemesterSelectorTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun collapsedPickerKeepsOriginalCompactSizeWithMultilineMenuOptions() {
+    @Test fun collapsedCapsuleIsNarrowWhileMenuRetainsItsFullWidthAfterReopening() {
         compose.setContent {
             MaterialTheme {
                 GlassOverlayHost {
-                    Box(Modifier.width(320.dp)) {
+                    Box(Modifier.width(360.dp).padding(horizontal = 12.dp)) {
                         SemesterSelector(listOf("current", "old"), mapOf("current" to "2026–2027 学年 第 1 学期",
                             "old" to "2025–2026 学年 学校补充的暑期学期"), "current", {})
                     }
                 }
             }
         }
-        compose.onNodeWithContentDescription("学期").assertWidthIsEqualTo(320.dp)
-            .assertHeightIsEqualTo(50.dp).performClick()
-        compose.onNodeWithText("2025–2026 学年 学校补充的暑期学期").assertIsDisplayed()
+        repeat(2) {
+            compose.onNodeWithContentDescription("学期").assertWidthIsEqualTo(280.dp)
+                .assertHeightIsEqualTo(50.dp).performClick()
+            compose.onNodeWithContentDescription("学期").assertWidthIsEqualTo(336.dp)
+            compose.onNodeWithText("2025–2026 学年 学校补充的暑期学期").assertIsDisplayed()
+            compose.onNodeWithContentDescription("学期").performClick()
+        }
+        compose.onNodeWithContentDescription("学期").assertWidthIsEqualTo(280.dp)
+    }
+
+    @Test fun compactCapsuleFitsASmallerParent() {
+        compose.setContent {
+            MaterialTheme {
+                GlassOverlayHost {
+                    Box(Modifier.width(240.dp)) {
+                        SemesterSelector(listOf("current"), mapOf("current" to "当前学期"), "current", {})
+                    }
+                }
+            }
+        }
+        compose.onNodeWithContentDescription("学期").assertWidthIsEqualTo(240.dp)
     }
 
     @Test fun emptyFailedCatalogCanBeRetriedThenAnOpaqueHistoricalTermSelected() {

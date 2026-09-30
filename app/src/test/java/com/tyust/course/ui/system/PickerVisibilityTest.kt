@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.tyust.course.manager.AppearanceSettingsManager
@@ -37,7 +38,8 @@ class PickerVisibilityTest {
                 LocalDensity provides Density(LocalDensity.current.density,fontScale)
             ) { GlassOverlayHost { Box(Modifier.fillMaxSize().background(Color.White)) {
                 SystemPicker(options=(0..99).map { "学期选项 $it" }, selectedIndex=if(last)98 else 0,
-                    onSelect={},label="学期", maxLabelLines=2,actionLabel="刷新列表",onAction={})
+                    onSelect={},label="学期", modifier=Modifier.width(280.dp),popupWidth=360.dp,
+                    maxLabelLines=2,actionLabel="刷新列表",onAction={})
             } } } }
         }
     }
