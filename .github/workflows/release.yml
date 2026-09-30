@@ -1,4 +1,5 @@
 name: Android Release Build
+run-name: Android ${{ inputs.test_only && 'test' || 'release' }} · ${{ inputs.tag || github.ref_name }}
 
 on:
   push:
@@ -7,13 +8,23 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: '要发布的版本号，如 v1.0.67。留空则沿用当前 ref（从 tag 页面手动触发时可留空）'
+        description: '构建版本号，如 v1.0.96。测试模式只用于版本计算，不创建 tag；从 tag 触发可留空'
         required: false
         default: ''
       release_notes:
         description: '更新日志（每行一条）。留空则读 release-notes/<tag>.md'
         required: false
         default: ''
+      test_only:
+        description: '仅生成签名 APK 和检查报告，供手动测试；不创建 tag、Release、更新提示或公告'
+        type: boolean
+        required: true
+        default: true
+      skip_gitee:
+        description: '跳过 Gitee APK、version.json 和公告同步（测试模式始终跳过）'
+        type: boolean
+        required: true
+        default: true
 
 permissions:
   contents: write
@@ -39,9 +50,9 @@ jobs:
       # 三种触发方式统一到同一个 tag 上：
       #   1. push tag            → github.ref_name 就是 tag
       #   2. 从 tag 页面手动触发  → 同上，inputs.tag 可留空
-      #   3. 从分支手动触发      → 必须给 inputs.tag，随后由本工作流建 tag
+      #   3. 从分支手动触发      → 必须给 inputs.tag；仅正式发布时创建 tag
       #
-      # 没有 tag 就不能发布：Gitee 的下载地址是按 tag 拼的，缺 tag 会产出死链。
+      # 测试构建也用显式版本读取日志和计算版本号，但不创建该 tag。
       - name: Resolve Release Target
         id: target
         env:
@@ -57,7 +68,7 @@ jobs:
             echo "Trigger: manual dispatch from ${GITHUB_REF_NAME} -> $TAG"
           else
             echo "ERROR: 从分支手动触发时必须填写 tag 输入（如 v1.0.67）。"
-            echo "       Gitee 下载地址按 tag 拼接，缺 tag 只会产出死链。"
+            echo "       测试模式也需显式版本，用于版本计算与读取更新日志。"
             exit 1
           fi
 
@@ -198,6 +209,7 @@ jobs:
           echo "version_name=${VN}" >> "$GITHUB_OUTPUT"
 
       - name: Validate Release Announcement
+        if: github.event_name != 'workflow_dispatch' || !inputs.test_only
         env:
           TAG: ${{ steps.target.outputs.tag }}
         run: |
@@ -212,8 +224,10 @@ jobs:
           cache: gradle
 
       - name: Decode Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > app/release-key.jks
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > app/release-key.jks
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -253,6 +267,7 @@ jobs:
       # 所以必须在发布前把 tag 建出来，否则产出的是死链。
       # 已存在则跳过：重跑同一版本是常见操作（补发、上次 Gitee 上传失败），不该因此报错。
       - name: Ensure Tag Exists
+        if: github.event_name != 'workflow_dispatch' || !inputs.test_only
         env:
           TAG: ${{ steps.target.outputs.tag }}
         run: |
@@ -271,6 +286,7 @@ jobs:
           echo "Tag ${TAG} 已推送"
 
       - name: Create GitHub Release
+        if: github.event_name != 'workflow_dispatch' || !inputs.test_only
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
@@ -293,13 +309,34 @@ jobs:
         with:
           name: release-apk
           path: app/build/outputs/apk/release/*.apk
-          retention-days: 3
+          retention-days: 7
+
+      - name: Summarize Build Delivery
+        env:
+          TEST_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.test_only }}
+          SKIP_GITEE: ${{ github.event_name == 'workflow_dispatch' && (inputs.test_only || inputs.skip_gitee) }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+        run: |
+          {
+            echo "### Android ${VERSION_NAME}"
+            echo "- Source: ${GITHUB_SHA}"
+            echo "- Signed APK: release-apk artifact (7 days)"
+            echo "- Test only: ${TEST_ONLY}"
+            echo "- Gitee skipped: ${SKIP_GITEE}"
+            if [ "$TEST_ONLY" = "true" ]; then
+              echo "- No tag, GitHub Release, update metadata or announcement is published."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove Signing Material
+        if: always()
+        run: rm -f app/release-key.jks
 
   sync-to-gitee:
+    if: github.event_name != 'workflow_dispatch' || (!inputs.test_only && !inputs.skip_gitee)
     needs: build
     runs-on: ubuntu-latest
-    # 不再按 github.ref 判断。上游已保证 tag 存在，无论触发方式如何都要同步，
-    # 否则手动触发只编译不发布，用户侧永远收不到更新。
+    # tag 发布保留原同步行为；手动测试始终跳过，正式手动发布也可独立跳过。
     steps:
       - name: Checkout Code (for version.properties)
         uses: actions/checkout@v4
