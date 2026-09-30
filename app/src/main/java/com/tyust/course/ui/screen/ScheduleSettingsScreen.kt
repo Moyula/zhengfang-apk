@@ -70,8 +70,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private const val PeriodCountMin = 8
-private const val PeriodCountMax = 16
+private const val PeriodCountMin = ScheduleSettingsManager.PERIOD_COUNT_MIN
+private const val PeriodCountMax = ScheduleSettingsManager.PERIOD_COUNT_MAX
 
 /**
  * 课表设置页。
@@ -108,6 +108,7 @@ fun ScheduleSettingsScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var periodCount by remember { mutableStateOf(manager.periodCount) }
+    LaunchedEffect(manager.revision) { periodCount = manager.periodCount }
     var storedPeriodTimes by remember { mutableStateOf(periodTimesOverride ?: manager.getPeriodTimes()) }
     var semesterStartDate by remember { mutableStateOf(semesterStartOverride ?: manager.semesterStartDate) }
     var showDatePicker by remember { mutableStateOf(false) }
