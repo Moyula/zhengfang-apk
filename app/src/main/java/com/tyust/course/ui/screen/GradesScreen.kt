@@ -515,21 +515,18 @@ internal fun SemesterSelector(
 ) {
     val selectedIndex = semesters.indexOf(currentSemester).takeIf { it >= 0 }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-            SystemPicker(
-                options = semesters.map { semesterLabels[it] ?: it },
-                selectedIndex = selectedIndex,
-                onSelect = { index -> semesters.getOrNull(index)?.let(onSemesterChange) },
-                modifier = Modifier.widthIn(max = 280.dp).fillMaxWidth(),
-                label = "学期",
-                maxLabelLines = 2,
-                maxSelectedLabelLines = 1,
-                popupWidth = maxWidth,
-                placeholder = if (isLoading) "正在加载学期…" else "选择学期",
-                actionLabel = if (onRefresh != null && !isLoading) "刷新学期列表" else null,
-                onAction = onRefresh.takeUnless { isLoading }
-            )
-        }
+        SystemPicker(
+            options = semesters.map { semesterLabels[it] ?: it },
+            selectedIndex = selectedIndex,
+            onSelect = { index -> semesters.getOrNull(index)?.let(onSemesterChange) },
+            modifier = Modifier.fillMaxWidth(),
+            label = "学期",
+            maxLabelLines = 2,
+            maxSelectedLabelLines = 1,
+            placeholder = if (isLoading) "正在加载学期…" else "选择学期",
+            actionLabel = if (onRefresh != null && !isLoading) "刷新学期列表" else null,
+            onAction = onRefresh.takeUnless { isLoading }
+        )
         when {
             isLoading -> Text("正在加载学期列表…", style = MaterialTheme.typography.bodySmall)
             error.isNotBlank() -> Text("学期列表加载失败：$error", style = MaterialTheme.typography.bodySmall,

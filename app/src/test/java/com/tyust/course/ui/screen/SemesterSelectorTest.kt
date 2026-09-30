@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.test.assertLeftPositionInRootIsEqualTo
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -31,7 +32,7 @@ import org.robolectric.annotation.Config
 class SemesterSelectorTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun collapsedCapsuleIsNarrowWhileMenuRetainsItsFullWidthAfterReopening() {
+    @Test fun capsuleKeepsItsOriginalContentWidthAndLeftEdgeAfterReopening() {
         compose.setContent {
             MaterialTheme {
                 GlassOverlayHost {
@@ -43,16 +44,18 @@ class SemesterSelectorTest {
             }
         }
         repeat(2) {
-            compose.onNodeWithContentDescription("学期").assertWidthIsEqualTo(280.dp)
+            compose.onNodeWithContentDescription("学期").assertWidthIsEqualTo(336.dp)
+                .assertLeftPositionInRootIsEqualTo(12.dp)
                 .assertHeightIsEqualTo(50.dp).performClick()
             compose.onNodeWithContentDescription("学期").assertWidthIsEqualTo(336.dp)
             compose.onNodeWithText("2025–2026 学年 学校补充的暑期学期").assertIsDisplayed()
             compose.onNodeWithContentDescription("学期").performClick()
         }
-        compose.onNodeWithContentDescription("学期").assertWidthIsEqualTo(280.dp)
+        compose.onNodeWithContentDescription("学期").assertWidthIsEqualTo(336.dp)
+            .assertLeftPositionInRootIsEqualTo(12.dp)
     }
 
-    @Test fun compactCapsuleFitsASmallerParent() {
+    @Test fun capsuleFitsASmallerParent() {
         compose.setContent {
             MaterialTheme {
                 GlassOverlayHost {
