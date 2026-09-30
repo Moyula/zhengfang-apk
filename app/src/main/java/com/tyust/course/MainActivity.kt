@@ -161,6 +161,7 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         com.tyust.course.ui.theme.StartupLogoAnimation.install(this)
         super.onCreate(savedInstanceState)
+        applyAdaptiveOrientation()
 
         UserManager.getInstance().init(this)
         PluginPages.refresh()

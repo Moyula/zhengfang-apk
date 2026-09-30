@@ -43,15 +43,14 @@
             android:authorities="${applicationId}.appearance"
             android:exported="false" />
         
-        <!-- 竖屏锁定：整套几何是按竖屏手机调的，横屏可用高只剩约 360dp，
-             顶栏加底栏会吃掉六成，那是一套从未验过的布局 -->
+        <!-- 手机竖屏/大屏自由方向由 Activity 在运行时读取窗口资源决定。
+             Manifest 不能引用带 sw600dp 等尺寸变体的 screenOrientation 资源。 -->
         <activity
             android:name=".MainActivity"
             android:theme="@style/Theme.CourseSelector.Starting"
             android:configChanges="uiMode"
             android:enableOnBackInvokedCallback="true"
             android:exported="true"
-            android:screenOrientation="@integer/main_orientation"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -63,27 +62,23 @@
             android:name=".LoginActivity"
             android:theme="@style/Theme.CourseSelector.Starting"
             android:configChanges="uiMode"
-            android:exported="false"
-            android:screenOrientation="@integer/main_orientation" />
+            android:exported="false" />
         <activity
             android:name=".CookieWebViewActivity"
             android:configChanges="uiMode"
             android:exported="false"
-            android:screenOrientation="@integer/main_orientation"
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".AcademicWebViewActivity"
             android:configChanges="uiMode"
             android:process=":academic_webview"
             android:exported="false"
-            android:screenOrientation="@integer/main_orientation"
             android:windowSoftInputMode="adjustResize" />
         <activity android:name=".CourseDetailActivity" android:exported="false" android:configChanges="uiMode" />
         <activity
             android:name=".SurveyWebViewActivity"
             android:exported="false"
             android:configChanges="uiMode"
-            android:screenOrientation="@integer/main_orientation"
             android:windowSoftInputMode="adjustResize" />
         
         <activity android:name=".academic.plugin.PluginCenterActivity" android:exported="false" android:configChanges="uiMode" />

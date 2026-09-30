@@ -146,6 +146,7 @@ class LoginActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         com.tyust.course.ui.theme.StartupLogoAnimation.install(this)
         super.onCreate(savedInstanceState)
+        applyAdaptiveOrientation()
         
         // Initialize UserManager with context for SharedPreferences
         UserManager.getInstance().init(this)
