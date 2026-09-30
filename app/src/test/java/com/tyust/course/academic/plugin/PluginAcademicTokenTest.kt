@@ -5,6 +5,8 @@ import android.net.Uri
 import com.tyust.course.academic.*
 import com.tyust.course.manager.UserManager
 import com.tyust.course.model.SchoolConfig
+import com.tyust.course.utils.RecoveryFailure
+import com.tyust.course.utils.SessionRecoveryResult
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
@@ -219,6 +221,93 @@ class PluginAcademicTokenTest {
         val final = runtime(); assertTrue(final.authenticated)
         final.logout(); final.close()
         val revoked = runtime(); assertFalse(revoked.authenticated); revoked.close()
+    }
+
+    @Test fun coldStartRestoresRememberedConsentAndCredentialsWithoutAnAuthorizationClick() = runBlocking {
+        val user = UserManager.getInstance(); user.addCustomSchool(school)
+        capture(); val pkg = install(serviceManifest("test.cold-consent"))
+        val first = ServicePluginSession(serviceContext(), pkg, "account")
+        var prompts = 0
+        first.ensureAcademicAuthorization { prompts++; "remember" }
+        val oldAccess = access(pkg); val oldGrant = oldAccess.existingGrant()!!
+        first.close(); AcademicGatewayFactory.invalidate(school, user.currentAccountStorageKey)
+        UserManager::class.java.getDeclaredField("instance").apply { isAccessible = true }.set(null, null)
+        UserManager.getInstance().init(app)
+        AcademicProviderRegistry.initialize(app)
+        // Token-based logins may have persisted consent before any new credential session exists.
+        val account = UserManager.getInstance().currentAccountStorageKey
+        AcademicGatewayFactory.invalidate(school, account)
+        assertNull(AcademicGatewayFactory.sharedSession(school, account))
+        val reopened = ServicePluginSession(serviceContext(), pkg, "account")
+        assertTrue(reopened.hasAcademicConsent()); assertFalse(reopened.authenticated)
+        var renewals = 0
+        assertEquals(ServiceAcademicRestore.Ready, restoreServiceAcademicLogin(reopened) { expected ->
+            renewals++
+            AcademicGatewayFactory.importCookie(school, account, "fixture=restored")
+            session = AcademicGatewayFactory.sharedSession(school, account)!!
+            capture(); SessionRecoveryResult.Recovered(expected)
+        })
+        assertEquals(1, prompts); assertEquals(1, renewals)
+        assertTrue(reopened.authenticated)
+        assertNotEquals(oldGrant, access(pkg).existingGrant())
+        assertThrows(PluginException::class.java) { oldAccess.requireGrant(oldGrant) }
+        reopened.close()
+    }
+
+    @Test fun readyConsentRestorationPreservesTheCurrentServiceSession() = runBlocking {
+        capture(); val pkg = install(serviceManifest("test.ready-consent"))
+        val runtime = ServicePluginSession(serviceContext(), pkg, "account")
+        runtime.ensureAcademicAuthorization { "remember" }
+        val before = runtime.session
+        assertEquals(ServiceAcademicRestore.Ready, restoreServiceAcademicLogin(runtime) { error("No login needed") })
+        assertSame(before, runtime.session); runtime.close()
+    }
+
+    @Test fun expiredLoginKeepsConsentAndDoesNotAskForConsentAgain() = runBlocking {
+        capture(); val pkg = install(serviceManifest("test.expired-consent"))
+        val runtime = ServicePluginSession(serviceContext(), pkg, "account")
+        runtime.ensureAcademicAuthorization { "remember" }
+        val user = UserManager.getInstance(); user.sessionState.expire(user.sessionState.token)
+        assertTrue(runtime.hasAcademicConsent()); assertFalse(runtime.authenticated)
+        var attempts = 0
+        val result = restoreServiceAcademicLogin(runtime) {
+            attempts++; SessionRecoveryResult.NeedsLogin(RecoveryFailure.NoPassword)
+        }
+        assertTrue(result is ServiceAcademicRestore.NeedsLogin); assertEquals(1, attempts)
+        assertTrue(runtime.hasAcademicConsent()); assertFalse(runtime.authenticated)
+        runtime.close()
+    }
+
+    @Test fun noConsentNeverStartsALoginOrAutomaticallyApprovesIt() = runBlocking {
+        val pkg = install(serviceManifest("test.no-consent"))
+        val runtime = ServicePluginSession(serviceContext(), pkg, "account")
+        assertEquals(ServiceAcademicRestore.NeedsConsent, restoreServiceAcademicLogin(runtime) { error("No consent") })
+        assertFalse(runtime.authenticated); runtime.close()
+    }
+
+    @Test fun revocationWhileRestoringCannotCreateANewGrant() = runBlocking {
+        capture(); val pkg = install(serviceManifest("test.revoke-restore"))
+        val runtime = ServicePluginSession(serviceContext(), pkg, "account")
+        runtime.ensureAcademicAuthorization { "remember" }; session.pluginToken = null
+        assertEquals(ServiceAcademicRestore.NeedsConsent, restoreServiceAcademicLogin(runtime) { expected ->
+            PluginAcademicSession.revoke(app, pkg.manifest.id)
+            SessionRecoveryResult.Recovered(expected)
+        })
+        assertFalse(runtime.authenticated); assertNull(access(pkg).existingGrant()); runtime.close()
+    }
+
+    @Test fun accountChangeWhileRestoringRejectsTheOldPage() = runBlocking {
+        capture(); val pkg = install(serviceManifest("test.account-restore"))
+        val user = UserManager.getInstance(); val original = user.currentAccountStorageKey
+        val runtime = ServicePluginSession(serviceContext(), pkg, "account", scopeStillActive = { user.currentAccountStorageKey == original })
+        runtime.ensureAcademicAuthorization { "remember" }; session.pluginToken = null
+        assertThrows(AcademicException::class.java) { runBlocking {
+            restoreServiceAcademicLogin(runtime) {
+                user.studentId = "different-account"; user.saveCookieLogin("fixture=other")
+                SessionRecoveryResult.Recovered(user.sessionState.token)
+            }
+        } }
+        assertFalse(runtime.authenticated); runtime.close()
     }
 
     @Test fun anExistingLoginConsentNeedsOneUpgradePromptThenNoRequestPrompts() = runBlocking {

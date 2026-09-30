@@ -7,6 +7,9 @@ import org.json.JSONObject
 
 /** A user grants a site, not a claim that each HTTP request is harmless. */
 internal object PluginSiteConsent {
+    fun key(caller: PluginPackage, account: String, school: String, provider: PluginPackage?) =
+        caller.manifest.id + ":academic-session:consent:site-v1:" + owner(caller, account, school, provider)
+
     fun owner(caller: PluginPackage, account: String, school: String, provider: PluginPackage?): String =
         PluginJson.sha256(PluginJson.canonical(JSONObject().put("caller", caller.manifest.id)
             .put("publisher", PluginReviewProof.publisher(caller)).put("account", account).put("school", school)

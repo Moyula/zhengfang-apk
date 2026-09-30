@@ -52,11 +52,20 @@ class ServicePluginSession(
     /** A renewed school login needs a fresh handle, not another consent dialog. */
     fun restoreAcademicAuthorization(): Boolean {
         ensureScope(); check(sharesAcademicSession)
+        if (authenticated) return true
         val access = academicAccess()
         if (!access.siteAuthorized()) return false
         val grant = access.existingGrant() ?: return false
         adopt(access, grant)
         return true
+    }
+    internal fun hasAcademicConsent(): Boolean {
+        ensureScope(); check(sharesAcademicSession)
+        return try { academicAccess().hasSiteConsent() }
+        catch (error: PluginException) {
+            if (error.code != PluginErrorCode.SESSION_EXPIRED) throw error
+            PluginAcademicSession.rememberedSiteConsent(app, pkg)
+        }
     }
     suspend fun ensureAcademicAuthorization(prompt: suspend (String) -> String?) {
         ensureScope()

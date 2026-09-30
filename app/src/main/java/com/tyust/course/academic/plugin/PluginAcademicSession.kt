@@ -39,11 +39,14 @@ internal class PluginAcademicSession(
         sourceDigest, token.generation.toString(), session.instanceId, epoch.toString()
     ).joinToString("\u0000").toByteArray())
 
-    fun requireCurrent() {
+    fun requireCurrent() = requireCurrent(requireLogin = true)
+
+    private fun requireCurrent(requireLogin: Boolean) {
         if (caller.manifest.sharesAcademicSession) ServicePluginContract.validateManifest(caller.manifest)
         else if ("academic.session" !in caller.manifest.permissions || "network" !in caller.manifest.permissions)
             denied("插件需要声明教务登录共享和网络权限")
-        if (prefs.getLong(revocationKey, 0L) != capturedRevocation || !active() || !callerCurrent() || school == null || !user.isLoggedIn || user.sessionState.state.value.expired ||
+        if (prefs.getLong(revocationKey, 0L) != capturedRevocation || !active() || !callerCurrent() || school == null ||
+            requireLogin && (!user.isLoggedIn || user.sessionState.state.value.expired) ||
             account.isBlank() || account != user.currentAccountStorageKey || !user.sessionState.isCurrent(token) ||
             school.toJson().toString() != user.currentSchool?.toJson()?.toString() || session.retired || session.epoch != epoch ||
             AcademicGatewayFactory.sharedSession(school, account) !== session ||
@@ -57,12 +60,20 @@ internal class PluginAcademicSession(
     private val consentKey = prefix(caller.manifest.id) + "consent:" + PluginConsentPolicy.identity(
         caller, account, school?.toJson().toString(), tokenProvider ?: provider)
     private val siteOrigins = PluginSiteConsent.origins(caller, tokenProvider ?: provider, base)
-    private val siteKey = prefix(caller.manifest.id) + "consent:site-v1:" + PluginSiteConsent.owner(
+    private val siteKey = PluginSiteConsent.key(
         caller, account, school!!.id + "\u0000" + PluginAuthScope.origin(base), tokenProvider ?: provider)
     private val sessionSiteKey = key + ":site"
     fun coordinationKey() = key + ":" + capturedRevocation
     fun siteAuthorized(): Boolean {
         requireCurrent()
+        return savedSiteConsent()
+    }
+    /** Consent can survive expired credentials; this boolean never authorizes an actual request. */
+    fun hasSiteConsent(): Boolean {
+        requireCurrent(requireLogin = false)
+        return savedSiteConsent()
+    }
+    private fun savedSiteConsent(): Boolean {
         val saved = prefs.getStringSet(siteKey, emptySet()).orEmpty() + prefs.getStringSet(sessionSiteKey, emptySet()).orEmpty()
         return siteOrigins.isNotEmpty() && saved.containsAll(siteOrigins)
     }
@@ -107,7 +118,7 @@ internal class PluginAcademicSession(
             "学校站点：${siteOrigins.joinToString("\n")}\n\n" +
             "允许查询、读取正文及更新已读等站内请求，刷新时不再逐条询问。站点授权无法判断每个接口的业务含义，请仅信任可靠来源。\n" +
             (if (local) "此次信任按包保存，未认定为官方审核；调用插件或登录提供者换包后需重新确认。\n" else "") +
-            "仅本次在当前登录会话内有效；记住后关闭页面、同账号重登无需再授权；可在插件详情撤销。选退课、评教等业务入口仍需确认，向其他网站提供个人数据另行授权。"
+            "仅本次在当前登录会话内有效；记住后关闭页面、重启 App 或同账号重登会自动恢复，无需再点授权；可在插件详情撤销。选退课、评教等业务入口仍需确认，向其他网站提供个人数据另行授权。"
     }
 
     /** Called only after the host confirmation completes; recheck every captured identity. */
@@ -272,6 +283,21 @@ internal class PluginAcademicSession(
         fun cancelProvider(id: String) = synchronized(grantLock) { byProvider.remove(id)?.forEach(PluginOperation::close); Unit }
         private val running = ConcurrentHashMap<String, MutableSet<PluginOperation>>()
         private fun prefix(id: String) = "$id:academic-session:"
+        /** Read durable consent before a cold start has reconstructed the credential session. */
+        internal fun rememberedSiteConsent(app: Context, caller: PluginPackage): Boolean {
+            val user = UserManager.getInstance()
+            val school = user.currentSchool ?: return false
+            if (!AcademicProviderRegistry.isCurrentPackage(caller.manifest.id, caller.digest) ||
+                !AcademicProviderRegistry.isEnabled(caller.manifest.id, school) || !AcademicProviderRegistry.matches(caller, school))
+                throw PluginException(PluginErrorCode.STALE_CONTEXT, "插件或学校已改变，请重新打开页面")
+            val base = school.fullBasePath.toHttpUrlOrNull() ?: return false
+            val provider = AcademicProviderRegistry.authenticationPackage(school) ?: AcademicProviderRegistry.resolve(school)
+            val origins = PluginSiteConsent.origins(caller, provider, base)
+            val key = PluginSiteConsent.key(caller, user.currentAccountStorageKey,
+                school.id + "\u0000" + PluginAuthScope.origin(base), provider)
+            return origins.isNotEmpty() && app.getSharedPreferences("native-plugin-permissions", Context.MODE_PRIVATE)
+                .getStringSet(key, emptySet()).orEmpty().containsAll(origins)
+        }
         fun revoke(app: Context, id: String) = synchronized(grantLock) {
             val prefs = app.getSharedPreferences("native-plugin-permissions", Context.MODE_PRIVATE)
             val edit = prefs.edit()

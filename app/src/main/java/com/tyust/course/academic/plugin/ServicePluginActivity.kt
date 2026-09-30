@@ -21,6 +21,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.tyust.course.LoginActivity
 import com.tyust.course.academic.*
 import com.tyust.course.manager.UserManager
 import com.tyust.course.ui.system.*
@@ -120,6 +124,18 @@ class ServicePluginActivity : ComponentActivity() {
         var busy by remember { mutableStateOf(false) }
         var message by remember { mutableStateOf("") }
         var loggedIn by remember { mutableStateOf(runtime.authenticated) }
+        var academicEntry by remember { mutableStateOf<ServiceAcademicRestore>(ServiceAcademicRestore.Restoring) }
+        val schoolSession by UserManager.getInstance().sessionState.state.collectAsState()
+        var resumeRevision by remember { mutableIntStateOf(0) }
+        val lifecycle = LocalLifecycleOwner.current.lifecycle
+        DisposableEffect(lifecycle) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) resumeRevision++
+            }
+            lifecycle.addObserver(observer)
+            onDispose { lifecycle.removeObserver(observer) }
+        }
+        var autoPageAttempted by remember { mutableStateOf(false) }
         var username by remember { mutableStateOf("") }
         var password by remember { mutableStateOf("") }
         var captcha by remember { mutableStateOf<CaptchaChallenge?>(null) }
@@ -140,7 +156,17 @@ class ServicePluginActivity : ComponentActivity() {
                 try { block() }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) { message = e.message ?: "服务暂时不可用" }
-                finally { busy = false; loggedIn = runtime.authenticated; if (!loggedIn) page = null }
+                finally {
+                    busy = false; loggedIn = runtime.authenticated
+                    if (!loggedIn) {
+                        page = null
+                        if (runtime.sharesAcademicSession) academicEntry = runCatching {
+                            if (runtime.hasAcademicConsent()) ServiceAcademicRestore.NeedsLogin(
+                                message.ifBlank { "已记住授权，请重新登录学校账号后继续。" })
+                            else ServiceAcademicRestore.NeedsConsent
+                        }.getOrElse { ServiceAcademicRestore.NeedsLogin(it.message ?: "当前登录不可用，请重新打开此页面。") }
+                    }
+                }
             }
         }
         fun load(id: String, params: JSONObject = JSONObject(), push: Boolean = false, pop: Boolean = false) = run {
@@ -191,7 +217,22 @@ class ServicePluginActivity : ComponentActivity() {
                 }
             } catch (e: Exception) { message = e.message ?: "无法打开此操作" }
         }
-        LaunchedEffect(runtime) { if (runtime.authenticated) load(initial) }
+        LaunchedEffect(runtime, schoolSession.token, schoolSession.expired, resumeRevision) {
+            if (runtime.sharesAcademicSession) {
+                if (!busy && (!runtime.authenticated || !autoPageAttempted)) run {
+                    loggedIn = runtime.authenticated
+                    academicEntry = ServiceAcademicRestore.Restoring
+                    academicEntry = restoreServiceAcademicLogin(runtime)
+                    if (academicEntry == ServiceAcademicRestore.Ready && !autoPageAttempted) {
+                        // Set before delivery: failed/unknown page operations must not replay on resume.
+                        autoPageAttempted = true
+                        page = withContext(Dispatchers.IO) { runtime.page(history.last().first, history.last().second) }
+                    }
+                }
+            } else if (runtime.authenticated && !autoPageAttempted) {
+                autoPageAttempted = true; load(initial)
+            }
+        }
         GlassPageScaffold(title = page?.getString("title") ?: pkg.manifest.name,
             subtitle = if (preview) "开发预览 · 校园服务" else "${pkg.manifest.school.getString("name")} · 校园服务", onBack = ::back) { padding ->
             Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()).verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp,
@@ -203,20 +244,21 @@ class ServicePluginActivity : ComponentActivity() {
                     TextButton(onClick = { PluginFeedback.open(this@ServicePluginActivity, pkg) }) { Text("快捷反馈") }
                 }
                 if (!loggedIn && runtime.sharesAcademicSession) {
-                    InsetGroupedSection(header = "使用本校教务登录", footer = "记住授权后，关闭页面或同账号重登无需再次确认。可在插件详情中撤销。") {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Text("使用已登录的教务账号，无需再次输入密码。教务登录过期时，请先重新登录本校账号。")
-                            LiquidButton({ run {
-                                runtime.ensureAcademicAuthorization { description ->
-                                    val answer = CompletableDeferred<String?>()
-                                    pendingAcademicAuthorization = description to answer
-                                    try { answer.await() } finally { pendingAcademicAuthorization = null }
-                                }
-                                page = withContext(Dispatchers.IO) { runtime.page(history.last().first, history.last().second) }
-                            }
-                            }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("service-academic-authorize"), style = LiquidButtonStyle.Tinted) { Text("授权使用本校登录") }
+                    ServiceAcademicEntry(academicEntry, busy, onAuthorize = { run {
+                        runtime.ensureAcademicAuthorization { description ->
+                            val answer = CompletableDeferred<String?>()
+                            pendingAcademicAuthorization = description to answer
+                            try { answer.await() } finally { pendingAcademicAuthorization = null }
                         }
-                    }
+                        academicEntry = ServiceAcademicRestore.Ready
+                        autoPageAttempted = true
+                        page = withContext(Dispatchers.IO) { runtime.page(history.last().first, history.last().second) }
+                    } }, onLogin = {
+                        startActivity(Intent(this@ServicePluginActivity, LoginActivity::class.java).apply {
+                            putExtra("force_relogin", true)
+                            putExtra(LoginActivity.EXTRA_RETURN_TO_CALLER, true)
+                        })
+                    })
                 } else if (!loggedIn) {
                     val auth = config.getJSONObject("authentication")
                     InsetGroupedSection(header = "登录此服务", footer = "服务账号独立于教务账号。密码仅用于本次登录，退出服务后清除会话。") {
