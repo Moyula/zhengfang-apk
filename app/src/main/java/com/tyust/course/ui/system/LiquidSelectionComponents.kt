@@ -1103,7 +1103,8 @@ fun LiquidPicker(
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
     backdrop: Backdrop? = LocalControlBackdrop.current,
-    maxLabelLines: Int = 1
+    maxLabelLines: Int = 1,
+    maxSelectedLabelLines: Int = maxLabelLines
 ) {
     var expanded by remember { mutableStateOf(false) }
     var actionPending by remember { mutableStateOf(false) }
@@ -1132,8 +1133,9 @@ fun LiquidPicker(
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
     val labelLines = maxLabelLines.coerceIn(1, 3)
+    val selectedLabelLines = maxSelectedLabelLines.coerceIn(1, 3)
     val headerHeight = maxOf(PickerHeaderHeight,
-        with(density) { MaterialTheme.typography.bodyLarge.lineHeight.toDp() } * labelLines.toFloat() + 16.dp)
+        with(density) { MaterialTheme.typography.bodyLarge.lineHeight.toDp() } * selectedLabelLines.toFloat() + 16.dp)
     val itemHeight = maxOf(PickerItemHeight, 48.dp,
         with(density) { MaterialTheme.typography.bodyMedium.lineHeight.toDp() } * labelLines.toFloat() + 16.dp)
 
@@ -1629,7 +1631,7 @@ fun LiquidPicker(
                             primaryContentColor
                         },
                         textAlign = if (descriptorPresent) TextAlign.End else TextAlign.Start,
-                        maxLines = labelLines,
+                        maxLines = selectedLabelLines,
                         overflow = TextOverflow.Ellipsis
                     )
                 }

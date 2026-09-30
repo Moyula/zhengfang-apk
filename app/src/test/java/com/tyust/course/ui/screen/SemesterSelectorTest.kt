@@ -3,9 +3,13 @@ package com.tyust.course.ui.screen
 import android.app.Application
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -25,6 +29,22 @@ import org.robolectric.annotation.Config
 @Config(sdk = [32], application = Application::class)
 class SemesterSelectorTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun collapsedPickerKeepsOriginalCompactSizeWithMultilineMenuOptions() {
+        compose.setContent {
+            MaterialTheme {
+                GlassOverlayHost {
+                    Box(Modifier.width(320.dp)) {
+                        SemesterSelector(listOf("current", "old"), mapOf("current" to "2026–2027 学年 第 1 学期",
+                            "old" to "2025–2026 学年 学校补充的暑期学期"), "current", {})
+                    }
+                }
+            }
+        }
+        compose.onNodeWithContentDescription("学期").assertWidthIsEqualTo(320.dp)
+            .assertHeightIsEqualTo(50.dp).performClick()
+        compose.onNodeWithText("2025–2026 学年 学校补充的暑期学期").assertIsDisplayed()
+    }
 
     @Test fun emptyFailedCatalogCanBeRetriedThenAnOpaqueHistoricalTermSelected() {
         val terms = mutableStateOf(emptyList<String>())

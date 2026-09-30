@@ -56,6 +56,7 @@ private fun AcademicGradesContent(school: SchoolConfig, account: String, provide
     var termReports by rememberPageData<Map<String, AcademicGradeReport>>("$cache:reports") { emptyMap() }
     var semester by rememberSaveable { mutableStateOf("") }
     var semesterChosen by rememberSaveable { mutableStateOf(false) }
+    var appliedCatalogTerm by rememberSaveable { mutableStateOf<String?>(null) }
     val standardTerms = remember(provider) {
         com.tyust.course.academic.plugin.AcademicProviderRegistry.operationProvider(school, "study.grades")
             ?.manifest?.json?.optJSONObject("studyOptions")?.optString("gradeTermFormat") == "academic-year-semester"
@@ -74,7 +75,11 @@ private fun AcademicGradesContent(school: SchoolConfig, account: String, provide
     var examLoading by remember { mutableStateOf(false) }
     var examError by remember { mutableStateOf("") }
     var examRevision by remember { mutableIntStateOf(0) }
-    val terms = remember(catalog, report, termReports, standardTerms) { gradeSemesters(catalog, report.grades + termReports.values.flatMap { it.grades }, standardTerms) }
+    val calendarDate = if (standardTerms) rememberGradeCalendarDate() else null
+    val terms = remember(catalog, report, termReports, standardTerms, calendarDate) {
+        gradeSemesters(catalog, report.grades + termReports.values.flatMap { it.grades }, standardTerms,
+            calendarDate?.calendar() ?: java.util.Calendar.getInstance())
+    }
     fun loadError(e: Exception): String {
         if ((e as? AcademicException)?.status == AcademicStatus.SESSION_EXPIRED)
             com.tyust.course.network.CourseApiClient.getInstance().notifyCookieExpired(expectedSession)
@@ -125,8 +130,12 @@ private fun AcademicGradesContent(school: SchoolConfig, account: String, provide
         finally { if (sessions.isCurrent(expectedSession)) overallLoading = false }
     }
     LaunchedEffect(terms, catalog?.currentTerm?.id) {
-        if (!semesterChosen || semester.isBlank() || terms.none { it.id == semester })
-            semester = initialGradeSemester(terms, catalog, standardTerms)
+        // A local date change adds choices without moving an existing selection or querying again.
+        if ((!semesterChosen && appliedCatalogTerm != catalog?.currentTerm?.id) ||
+            semester.isBlank() || terms.none { it.id == semester })
+            semester = initialGradeSemester(terms, catalog, standardTerms,
+                calendarDate?.calendar() ?: java.util.Calendar.getInstance())
+        appliedCatalogTerm = catalog?.currentTerm?.id
     }
     LaunchedEffect(semester, termRevision, session.token) {
         if (semester.isBlank() || 0 !in supportedTabs) { loading = false; return@LaunchedEffect }
