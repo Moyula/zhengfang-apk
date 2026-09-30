@@ -1,10 +1,11 @@
 package com.tyust.course.academic
 
-import java.time.LocalDate
+import java.util.Calendar
 
-internal fun currentGradeTerm(date: LocalDate = LocalDate.now()): AcademicTerm {
-    val year = if (date.monthValue >= 8) date.year else date.year - 1
-    val semester = if (date.monthValue in 2..7) 2 else 1
+internal fun currentGradeTerm(date: Calendar = Calendar.getInstance()): AcademicTerm {
+    val month = date.get(Calendar.MONTH) + 1
+    val year = date.get(Calendar.YEAR) - if (month >= 8) 0 else 1
+    val semester = if (month in 2..7) 2 else 1
     return AcademicTerm("$year-${year + 1}-$semester", "$year–${year + 1} 学年 第 $semester 学期")
 }
 
@@ -19,7 +20,7 @@ private fun standardGradeKey(term: AcademicTerm): Pair<Int, Int>? {
 
 /** Opt-in only: never infer a school's query format from its protocol name. */
 internal fun gradeSemesters(catalog: AcademicStudyCatalog?, grades: List<AcademicGrade>,
-    standardFormat: Boolean = false, date: LocalDate = LocalDate.now()): List<AcademicTerm> {
+    standardFormat: Boolean = false, date: Calendar = Calendar.getInstance()): List<AcademicTerm> {
     val known = catalog?.let { it.terms + it.currentTerm }.orEmpty().distinctBy { it.id }
     val additional = grades.map { it.term }.filter { it.isNotBlank() && known.none { term -> term.id == it } }
         .distinct().sortedDescending().map { AcademicTerm(it) }
@@ -43,7 +44,7 @@ internal fun gradeSemesters(catalog: AcademicStudyCatalog?, grades: List<Academi
 }
 
 internal fun initialGradeSemester(terms: List<AcademicTerm>, catalog: AcademicStudyCatalog?,
-    standardFormat: Boolean, date: LocalDate = LocalDate.now()): String {
+    standardFormat: Boolean, date: Calendar = Calendar.getInstance()): String {
     val current = currentGradeTerm(date)
     return catalog?.currentTerm?.takeIf { candidate -> terms.any { it.id == candidate.id } &&
         (!standardFormat || standardGradeKey(candidate)?.let { it.first < current.year ||

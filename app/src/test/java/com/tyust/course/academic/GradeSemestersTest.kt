@@ -31,7 +31,7 @@ class GradeSemestersTest {
     }
 
     @Test fun builtinChoicesAreImmediateAndNeverIncludeFutureSemesters() {
-        val date = java.time.LocalDate.of(2026, 9, 30)
+        val date = java.util.GregorianCalendar(2026, 8, 30)
         val terms = gradeSemesters(null, emptyList(), true, date)
         assertEquals(15, terms.size)
         assertEquals("2026-2027-1", terms.first().id)
@@ -39,14 +39,14 @@ class GradeSemestersTest {
         assertFalse(terms.any { it.id == "2026-2027-2" })
     }
     @Test fun augustBoundaryChangesTheAcademicYear() {
-        assertEquals("2025-2026-2", currentGradeTerm(java.time.LocalDate.of(2026,7,31)).id)
-        assertEquals("2026-2027-1", currentGradeTerm(java.time.LocalDate.of(2026,8,1)).id)
-        assertEquals("2026-2027-2", currentGradeTerm(java.time.LocalDate.of(2027,2,1)).id)
+        assertEquals("2025-2026-2", currentGradeTerm(java.util.GregorianCalendar(2026, 6, 31)).id)
+        assertEquals("2026-2027-1", currentGradeTerm(java.util.GregorianCalendar(2026, 7, 1)).id)
+        assertEquals("2026-2027-2", currentGradeTerm(java.util.GregorianCalendar(2027, 1, 1)).id)
     }
     @Test fun futureWebsiteYearsAreHiddenButActualGradesArePreserved() {
         val future = AcademicTerm("2033-2034-1")
         val catalog = AcademicStudyCatalog(listOf(future), future)
-        val date = java.time.LocalDate.of(2026,9,30)
+        val date = java.util.GregorianCalendar(2026, 8, 30)
         assertFalse(gradeSemesters(catalog, emptyList(), true, date).any { it.id == future.id })
         assertTrue(gradeSemesters(catalog, listOf(grade(future.id)), true, date).any { it.id == future.id })
         assertEquals("2026-2027-1", initialGradeSemester(gradeSemesters(catalog, listOf(grade(future.id)), true, date), catalog, true, date))
@@ -55,7 +55,7 @@ class GradeSemestersTest {
         val school = AcademicTerm("school-current", "学校秋季", 2026, 1)
         val summer = AcademicTerm("2025-2026-3", "短学期", 2025, 3)
         val catalog = AcademicStudyCatalog(listOf(school, summer, school), school)
-        val date = java.time.LocalDate.of(2026,9,30)
+        val date = java.util.GregorianCalendar(2026, 8, 30)
         val terms = gradeSemesters(catalog, emptyList(), true, date)
         assertEquals(school, terms.first())
         assertFalse(terms.any { it.id == "2026-2027-1" })
