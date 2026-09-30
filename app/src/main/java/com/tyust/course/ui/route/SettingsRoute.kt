@@ -365,7 +365,8 @@ fun SettingsRoute(
         onCheckUpdate = { checkForUpdate() },
         onAbout = { showAboutDialog = true },
         onCredits = { showCreditsDialog = true },
-        onLogout = { showLogoutDialog = true },
+        isDemoMode = isDemoMode,
+        onLogout = { if (isDemoMode) performLogout() else showLogoutDialog = true },
         onQuotaClick = { showQuotaDialog = true },
         onRefreshCookieClick = { refreshCookieManually() },
         onLogExport = { com.tyust.course.utils.LogUtils.exportLogs(context) },
@@ -629,7 +630,6 @@ fun SettingsRoute(
             onRelogin = { showAccountManagerDialog = false; relogin.launch(Intent(context, LoginActivity::class.java).apply {
                 putExtra("force_relogin", true); putExtra(LoginActivity.EXTRA_RETURN_TO_CALLER, true)
             }) },
-            onLogout = { showAccountManagerDialog = false; showLogoutDialog = true },
             onDismiss = { showAccountManagerDialog = false }
         )
     }
@@ -947,7 +947,7 @@ private fun AccountManagerDialog(
     onSwitchAccount: (String) -> Unit,
     onDeletePassword: (UserManager.AccountRecord) -> Unit,
     onDeleteAccount: (UserManager.AccountRecord) -> Unit,
-    onRelogin: () -> Unit, onLogout: () -> Unit,
+    onRelogin: () -> Unit,
     onDismiss: () -> Unit
 ) {
     SystemDialog(
@@ -989,7 +989,6 @@ private fun AccountManagerDialog(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             TextButton(onClick = onRelogin) { Text("重新登录 · 保留已存账号") }
-            TextButton(onClick = onLogout) { Text("退出当前账号", color = MaterialTheme.colorScheme.error) }
             if (accounts.isEmpty()) {
                 Text(
                     text = "本机还没有保存任何账号。",

@@ -18,6 +18,7 @@ object AcademicProviderRegistry {
     fun operationProvider(school: SchoolConfig, operation: String): PluginPackage? = runCatching {
         val pkg = resolve(school) ?: return@runCatching null
         if (operation in pkg.manifest.capabilities) pkg
+        else if (operation == "selection.filters" && "selection.catalog" in pkg.manifest.capabilities) null
         else BuiltinAcademicInheritance.providers[pkg.manifest.baseProvider]?.let(::protocolPackage)
             ?.takeIf { operation in it.manifest.capabilities }
     }.getOrNull()
@@ -173,13 +174,7 @@ object AcademicProviderRegistry {
         if (choice.startsWith("builtin.")) return builtin(school, choice.removePrefix("builtin.")) != null
         return choice.isNotBlank() || candidates(school).isNotEmpty() || builtin(school) != null
     }
-    fun hasCapability(school: SchoolConfig, operation: String): Boolean = runCatching {
-        val pkg = resolve(school)
-        if (pkg == null) false
-        else operation in pkg.manifest.capabilities || pkg.manifest.baseProvider?.let { base ->
-            BuiltinAcademicInheritance.providers[base]?.let { operation in protocolPackage(it)?.manifest?.capabilities.orEmpty() } ?: false
-        } == true
-    }.getOrDefault(false)
+    fun hasCapability(school: SchoolConfig, operation: String): Boolean = operationProvider(school, operation) != null
     fun overrides(school: SchoolConfig, operation: String): Boolean = runCatching {
         val pkg = resolve(school) ?: return@runCatching false
         operation in pkg.manifest.capabilities || BuiltinAcademicInheritance.providers[pkg.manifest.baseProvider]?.let {

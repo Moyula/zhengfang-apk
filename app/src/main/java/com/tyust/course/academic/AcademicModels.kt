@@ -40,8 +40,17 @@ data class CourseQuery(
     val teacher: String = "",
     val start: Int = 0,
     val pageSize: Int = 50,
-    val scopeId: String = ""
+    val scopeId: String = "",
+    val filters: CourseFilterValues? = null
 )
+
+data class CourseFilterOption(val value: String, val label: String)
+data class CourseFilterGroup(val id: String, val label: String, val kind: String, val options: List<CourseFilterOption>)
+data class CourseFilters(val roundId: String, val revision: String, val groups: List<CourseFilterGroup>)
+data class CourseFilterValues(val revision: String, val values: Map<String, List<String>>) {
+    fun toJson() = org.json.JSONObject().put("revision", revision).put("values",
+        org.json.JSONObject().apply { values.forEach { (key, value) -> put(key, org.json.JSONArray(value)) } })
+}
 
 data class CourseContext(
     val sessionEpoch: Long,
@@ -118,6 +127,8 @@ class AcademicException(val status: AcademicStatus, message: String, cause: Thro
 data class AcademicSessionKey(val schoolId: String, val accountKey: String)
 
 interface AcademicProtocolAdapter {
+    val hasCourseFilters: Boolean get() = false
+    suspend fun courseFilters(context: CourseContext, roundId: String): CourseFilters? = null
     fun restoreOffer(snapshot: Map<String, String>): CourseOffer? = null
     suspend fun login(credentials: Credentials): LoginResult
     suspend fun validateSession(): LoginResult

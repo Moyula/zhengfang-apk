@@ -5,7 +5,7 @@ import com.tyust.course.manager.SessionToken
 import com.tyust.course.model.Course
 import com.tyust.course.model.SchoolConfig
 
-data class AcademicCoursePage(val context: CourseContext, val courses: List<Course>)
+data class AcademicCoursePage(val context: CourseContext, val courses: List<Course>, val filters: CourseFilters? = null, val filterError: String = "")
 
 /** Converts protocol-neutral course objects to the model used by the existing Compose screens. */
 object AcademicCourseBridge {
@@ -27,8 +27,14 @@ object AcademicCourseBridge {
             val context = adapter.loadCourseContext()
             if (query.scopeId.isNotBlank() && context.scopes.none { it.id == query.scopeId })
                 throw AcademicException(AcademicStatus.ROUND_CLOSED, "该轮次已结束，请切换其他轮次")
-            val offers = adapter.listCourses(context, query)
-            AcademicCoursePage(context, offers.map { toCourse(it).apply { completeParams["academic_system"] = school.academicSystem } })
+            val requested = if (adapter.hasCourseFilters && query.scopeId.isBlank()) query.copy(scopeId = context.scopes.firstOrNull()?.id.orEmpty()) else query
+            val offers = adapter.listCourses(context, requested)
+            var filterError = ""
+            val filters = if (adapter.hasCourseFilters && requested.scopeId.isNotBlank()) try {
+                adapter.courseFilters(context, requested.scopeId)
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { filterError = e.message ?: "筛选条件加载失败"; null } else null
+            AcademicCoursePage(context, offers.map { toCourse(it).apply { completeParams["academic_system"] = school.academicSystem } }, filters, filterError)
         }
     }
 

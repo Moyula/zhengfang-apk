@@ -519,6 +519,7 @@ internal fun SemesterSelector(
             onSelect = { index -> semesters.getOrNull(index)?.let(onSemesterChange) },
             modifier = Modifier.fillMaxWidth(),
             label = "学期",
+            maxLabelLines = 2,
             placeholder = if (isLoading) "正在加载学期…" else "选择学期",
             actionLabel = if (onRefresh != null && !isLoading) "刷新学期列表" else null,
             onAction = onRefresh.takeUnless { isLoading }

@@ -48,6 +48,18 @@
     "entry": {
       "const": "index.js"
     },
+    "studyOptions": {
+      "type": "object",
+      "properties": {
+        "gradeTermFormat": {
+          "const": "academic-year-semester"
+        }
+      },
+      "required": [
+        "gradeTermFormat"
+      ],
+      "additionalProperties": false
+    },
     "builtinConfig": {
       "anyOf": [
         {
@@ -125,6 +137,7 @@
           "study.grades",
           "study.gradeDetails",
           "study.exams",
+          "selection.filters",
           "selection.catalog",
           "selection.courses",
           "selection.sections",

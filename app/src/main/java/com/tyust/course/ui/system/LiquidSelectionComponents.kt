@@ -54,6 +54,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
@@ -168,7 +169,6 @@ private val PickerCornerRadius = 20.dp
 private val PickerExpandedGap = 12.dp
 private val PickerOpeningOverlap = 16.dp
 private val PickerClosingOverlap = 24.dp
-private const val PickerItemStaggerSeconds = 0.018f
 private val PickerItemEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 private const val PickerCircleBezier = 0.5522848f
 
@@ -1145,6 +1145,8 @@ fun LiquidPicker(
             PickerItemGap * (rowCount - 1).toFloat()
     }
     val bodyHeight = minOf(bodyContentHeight, PickerMaxBodyHeight, portalBodySpace)
+    var openingFirstRow by remember { mutableIntStateOf(0) }
+    val openingRowCount = kotlin.math.ceil((bodyHeight / (itemHeight + PickerItemGap)).toDouble()).toInt() + 1
     val motion = remember { PickerMotionState(initialPosition = 0f) }
     LaunchedEffect(expanded, reduceMotion) {
         motion.animateTo(
@@ -1255,18 +1257,8 @@ fun LiquidPicker(
         smoothStep((heightProgress - 0.02f) / 0.12f)
     }
     fun rowRevealProgress(index: Int): Float {
-        if (reduceMotion) return if (expanded) 1f else 0f
-        return if (expanded) {
-            val timed = smoothStep(
-                (motionTimeSeconds - 0.22f - index * PickerItemStaggerSeconds) / 0.20f
-            )
-            val containerReady = smoothStep((settledProgress - 0.50f) / 0.34f)
-            minOf(timed, containerReady)
-        } else {
-            // Closing is driven by geometry, not a reverse authored cascade. The body clip removes
-            // rows from bottom to top while the remaining content stays legible until absorption.
-            smoothStep((heightProgress - 0.015f) / 0.11f)
-        }
+        return pickerRowReveal(index, openingFirstRow, openingRowCount, expanded,
+            motion.isSettled, reduceMotion, motionTimeSeconds, settledProgress, heightProgress)
     }
 
     LaunchedEffect(canOpen) {
@@ -1290,6 +1282,7 @@ fun LiquidPicker(
                 val centered = rowTop - (viewport - itemHeight) / 2
                 scrollState.scrollTo(centered.coerceIn(0, scrollState.maxValue))
             }
+            openingFirstRow = (scrollState.value / with(density) { (itemHeight + PickerItemGap).toPx() }).toInt()
         }
     }
     BackHandler(enabled = expanded) { expanded = false }

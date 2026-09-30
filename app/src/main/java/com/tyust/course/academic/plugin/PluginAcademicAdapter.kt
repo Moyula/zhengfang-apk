@@ -199,12 +199,27 @@ class PluginAcademicAdapter(
     override suspend fun exams(term: AcademicTerm): List<AcademicExam> = if (has("study.exams"))
         pages("study.exams", JSONObject().put("termId", term.id)).map { AcademicExam(it.getString("name"), it.getString("time"), it.optString("location"), it.optString("seat"), it.optString("examName"), it.optString("teacher")) }
         else study?.exams(term) ?: unsupported("study.exams")
+    override val hasCourseFilters: Boolean get() = has("selection.filters") || !has("selection.catalog") && base?.hasCourseFilters == true
+    override suspend fun courseFilters(context: CourseContext, roundId: String): CourseFilters? {
+        check(context)
+        if (!has("selection.filters")) return if (!has("selection.catalog")) base?.courseFilters(context, roundId) else null
+        if (context.scopes.none { it.id == roundId }) throw AcademicException(AcademicStatus.ROUND_CLOSED, "选课未开放，暂无法获取筛选条件")
+        val result = invoke("selection.filters", JSONObject().put("roundId", roundId))
+        if (result.getString("roundId") != roundId) throw AcademicException(AcademicStatus.PAGE_CHANGED, "筛选轮次不匹配")
+        val groups = PluginJson.objects(result.getJSONArray("groups")).map { group ->
+            CourseFilterGroup(group.getString("id"), group.getString("label"), group.getString("kind"),
+                PluginJson.objects(group.getJSONArray("options")).map { CourseFilterOption(it.getString("value"), it.getString("label")) })
+        }
+        if (groups.distinctBy { it.id }.size != groups.size || groups.any { it.options.distinctBy { o -> o.value }.size != it.options.size })
+            throw AcademicException(AcademicStatus.PAGE_CHANGED, "学校筛选包含重复标识")
+        return CourseFilters(roundId, result.getString("revision"), groups)
+    }
     override suspend fun loadCourseContext(): CourseContext = if (has("selection.catalog")) CourseContext(session.epoch,
         pages("selection.catalog").filter { it.getBoolean("open") }.map { CourseScope(it.getString("id"), it.getString("name"), it.optString("termId")) }) else native().loadCourseContext()
     override suspend fun listCourses(context: CourseContext, query: CourseQuery): List<CourseOffer> = if (has("selection.courses")) {
         check(context)
         val scopes = context.scopes.filter { query.scopeId.isBlank() || it.id == query.scopeId }
-        scopes.flatMap { scope -> pages("selection.courses", JSONObject().put("roundId", scope.id).put("keyword", query.keyword).put("teacher", query.teacher)).map {
+        scopes.flatMap { scope -> pages("selection.courses", JSONObject().put("roundId", scope.id).put("keyword", query.keyword).put("teacher", query.teacher).apply { query.filters?.let { put("filters", it.toJson()) } }).map {
             CourseOffer(it.getString("id"), it.getString("name"), it.optString("teacher"), it.optString("time"), it.optString("location"), it.optString("credits"),
                 number(it,"capacity"), number(it,"selected"), scope.id, mapOf("sectionId" to it.optString("sectionId"), "jxbmc" to it.optString("sectionName")))
         } }.drop(query.start).take(query.pageSize)

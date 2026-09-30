@@ -81,6 +81,7 @@ fun SettingsScreen(
     onAbout: () -> Unit,
     onCredits: () -> Unit,
     onLogout: () -> Unit,
+    isDemoMode: Boolean = false,
     onQuotaClick: () -> Unit = {},
     onRefreshCookieClick: () -> Unit = {},
     onLogExport: () -> Unit = {},
@@ -193,6 +194,14 @@ fun SettingsScreen(
                     onClick = onAccountManage, showDivider = false
                 )
 
+            }
+
+            InsetGroupedSection {
+                SettingsRow(icon = Icons.AutoMirrored.Filled.ExitToApp,
+                    iconTint = SemanticDanger,
+                    title = if (isDemoMode) "退出预览" else "退出登录",
+                    subtitle = if (isDemoMode) "返回登录页，保留真实账号与缓存" else "结束当前登录，保留已存账号",
+                    onClick = onLogout, showDivider = false)
             }
 
             InsetGroupedSection(Modifier.moduleEntrance(3), header = "外观") {

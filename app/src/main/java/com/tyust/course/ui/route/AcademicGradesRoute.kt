@@ -55,6 +55,11 @@ private fun AcademicGradesContent(school: SchoolConfig, account: String, provide
     var catalog by rememberPageData<AcademicStudyCatalog?>("$cache:terms") { null }
     var termReports by rememberPageData<Map<String, AcademicGradeReport>>("$cache:reports") { emptyMap() }
     var semester by rememberSaveable { mutableStateOf("") }
+    var semesterChosen by rememberSaveable { mutableStateOf(false) }
+    val standardTerms = remember(provider) {
+        com.tyust.course.academic.plugin.AcademicProviderRegistry.operationProvider(school, "study.grades")
+            ?.manifest?.json?.optJSONObject("studyOptions")?.optString("gradeTermFormat") == "academic-year-semester"
+    }
     var loading by remember { mutableStateOf(true) }
     var overallLoading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
@@ -69,7 +74,7 @@ private fun AcademicGradesContent(school: SchoolConfig, account: String, provide
     var examLoading by remember { mutableStateOf(false) }
     var examError by remember { mutableStateOf("") }
     var examRevision by remember { mutableIntStateOf(0) }
-    val terms = remember(catalog, report, termReports) { gradeSemesters(catalog, report.grades + termReports.values.flatMap { it.grades }) }
+    val terms = remember(catalog, report, termReports, standardTerms) { gradeSemesters(catalog, report.grades + termReports.values.flatMap { it.grades }, standardTerms) }
     fun loadError(e: Exception): String {
         if ((e as? AcademicException)?.status == AcademicStatus.SESSION_EXPIRED)
             com.tyust.course.network.CourseApiClient.getInstance().notifyCookieExpired(expectedSession)
@@ -120,8 +125,8 @@ private fun AcademicGradesContent(school: SchoolConfig, account: String, provide
         finally { if (sessions.isCurrent(expectedSession)) overallLoading = false }
     }
     LaunchedEffect(terms, catalog?.currentTerm?.id) {
-        if (semester.isBlank() || terms.none { it.id == semester })
-            semester = catalog?.currentTerm?.id?.takeIf { id -> terms.any { it.id == id } } ?: terms.firstOrNull()?.id.orEmpty()
+        if (!semesterChosen || semester.isBlank() || terms.none { it.id == semester })
+            semester = initialGradeSemester(terms, catalog, standardTerms)
     }
     LaunchedEffect(semester, termRevision, session.token) {
         if (semester.isBlank() || 0 !in supportedTabs) { loading = false; return@LaunchedEffect }
@@ -160,7 +165,7 @@ private fun AcademicGradesContent(school: SchoolConfig, account: String, provide
     com.tyust.course.ui.system.ReportPageContent(report.grades.isNotEmpty() || semesterGrades.isNotEmpty() || exams.isNotEmpty())
     GradesScreen(currentTab = tab, onTabChange = { tab = it },
         semesterGrades = semesterGrades, semesters = semesterIds, semesterLabels = semesterLabels,
-        currentSemester = semester, onSemesterChange = { semester = it; error = "" },
+        currentSemester = semester, onSemesterChange = { semesterChosen = true; semester = it; error = "" },
         semesterIsLoading = loading || (terms.isEmpty() && overallLoading), overallGrades = overallGrades,
         overallStats = overallStats, overallIsLoading = overallLoading,
         examList = exams, examIsLoading = examLoading,
