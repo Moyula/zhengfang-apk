@@ -48,10 +48,18 @@ class PluginSandboxService : Service() {
     }
 
     private suspend fun runEngine(request: JSONObject, host: IPluginHost): String = withTimeout(PluginLimits.WALL_MILLIS) {
+        suspend fun stage(name: String) = coroutineScope {
+            PluginWire.send(this, JSONObject().put("stage", name).toString()).use { input ->
+                host.call(request.getJSONObject("context").getString("operationId"), "__runtimeStage", input).use { PluginWire.read(it) }
+            }
+        }
+        stage("engine_initializing")
         val start = android.os.SystemClock.elapsedRealtime()
-        val engine = QuickJs.create(Dispatchers.IO)
+        val engine = try { QuickJs.create(Dispatchers.IO) }
+            catch (e: LinkageError) { throw PluginException(PluginErrorCode.RUNTIME_EXITED, "插件引擎无法初始化", e) }
         android.util.Log.i("PluginSandbox", "phase=engine_ready elapsedMs=${android.os.SystemClock.elapsedRealtime() - start}")
         try {
+            stage("engine_ready")
             engine.memoryLimit = PluginLimits.MEMORY_BYTES
             engine.maxStackSize = PluginLimits.STACK_BYTES
             engine.evaluationTimeoutMillis = if (request.getString("operation").startsWith("auth."))
@@ -79,9 +87,11 @@ class PluginSandboxService : Service() {
                 }
             }
             // One evaluation covers bootstrap, plugin initialization and invocation under one JS budget.
+            stage("plugin_loading")
             val source = request.getString("source")
             val invoke = JSONObject(request.toString()).apply { remove("source") }
             engine.evaluate<Unit>(sdk + "\n;" + source + "\n;__zfInvoke(" + invoke.toString() + ").then(__zfResult);void 0;", "plugin.js")
+            stage("script")
             completion.await().also { android.util.Log.i("PluginSandbox", "phase=engine_done elapsedMs=${android.os.SystemClock.elapsedRealtime() - start}") }
         } finally { engine.close() }
     }

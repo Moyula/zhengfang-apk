@@ -23,16 +23,16 @@ internal object PluginHttpClients {
         while (clients.size > 16) {
             val oldest = clients.entries.iterator(); val entry = oldest.next(); oldest.remove(); entry.value.connectionPool.evictAll()
         }
-        return base.newBuilder().cookieJar(cookies).eventListener(Trace(operation.manifest.version)).build()
+        return base.newBuilder().cookieJar(cookies).eventListener(Trace(operation)).build()
     }
     @Synchronized fun clearPlugin(id: String) {
         val iterator = clients.entries.iterator()
         while (iterator.hasNext()) { val entry = iterator.next(); if (entry.key.startsWith(id + "\u0000")) { entry.value.connectionPool.evictAll(); iterator.remove() } }
     }
     @Synchronized fun clear() { clients.values.forEach { it.connectionPool.evictAll() }; clients.clear() }
-    private class Trace(private val version: String) : EventListener() {
+    private class Trace(private val operation: PluginOperation) : EventListener() {
         private val started = SystemClock.elapsedRealtime()
-        private fun mark(phase: String) { Log.i("PluginNetwork", "api=${Build.VERSION.SDK_INT} version=$version phase=$phase elapsedMs=${SystemClock.elapsedRealtime() - started}") }
+        private fun mark(phase: String) { PluginTrace.stage(operation, phase); Log.i("PluginNetwork", "api=${Build.VERSION.SDK_INT} version=${operation.manifest.version} phase=$phase elapsedMs=${SystemClock.elapsedRealtime() - started}") }
         override fun callStart(call: Call) = mark("start")
         override fun dnsStart(call: Call, domainName: String) = mark("dns")
         override fun dnsEnd(call: Call, domainName: String, inetAddressList: List<java.net.InetAddress>) = mark("dns_done")

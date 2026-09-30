@@ -34,6 +34,7 @@ object AcademicProviderRegistry {
     @Volatile private var bundled: Map<String, PluginPackage> = emptyMap()
     fun initialize(context: Context) {
         app = context.applicationContext; localEndpoint = null
+        PluginTrace.initialize(context)
         bundled = BundledAcademicProviders.load { context.assets.open(it).use { stream -> stream.readBytes() } }
         store = PluginPackageStore(context, trustedKeys()); runCatching { reload() }
     }

@@ -41,7 +41,13 @@ class PluginSandboxBindingTest {
     private suspend fun invoke(context: Context, op: PluginOperation, timeout: Long = 100) =
         PluginSandboxClient(context, timeout, 0).execute("", JSONObject(), op, PluginHost(op, app.cacheDir))
 
-    private fun replyingContext(response: JSONObject) = BindingContext(app) { connection ->
+    private fun replyingContext(response: JSONObject, firstFailure: String? = null): BindingContext {
+        var attempts = 0
+        return BindingContext(app) { connection ->
+        if (attempts++ == 0 && firstFailure != null) {
+            if (firstFailure == "null") connection.onNullBinding(ComponentName(app, PluginSandboxService::class.java))
+            return@BindingContext firstFailure != "false"
+        }
         connection.onServiceConnected(ComponentName(app, PluginSandboxService::class.java), object : IPluginSandbox.Stub() {
             override fun execute(input: ParcelFileDescriptor, host: IPluginHost, callback: IPluginResult) {
                 // Robolectric backs pipes with files: EOF can precede the async writer.
@@ -70,8 +76,30 @@ class PluginSandboxBindingTest {
             override fun cancel(operationId: String) {}
         })
         true
+        }
     }
 
+    @Test fun transientStartupFailureRecoversBeforeDeliveringLogin() = runBlocking {
+        for (failure in listOf("false", "null")) {
+            val context = replyingContext(PluginJson.success(JSONObject()), failure)
+            val login = PluginOperation(AcademicSessionStore().session("synthetic", "account", "https://school.test"), operation().manifest, "auth.start", development = true)
+            try { assertTrue(invoke(context, login, 1000).getBoolean("ok")); assertEquals(2, context.bound) }
+            finally { login.close() }
+        }
+    }
+    @Test fun attemptedDeliveryIsNeverReplayedEvenWhenBinderDies() = runBlocking {
+        var delivered = 0
+        val context = BindingContext(app) { connection ->
+            connection.onServiceConnected(ComponentName(app, PluginSandboxService::class.java), object : IPluginSandbox.Stub() {
+                override fun execute(input: ParcelFileDescriptor, host: IPluginHost, callback: IPluginResult) { delivered++; input.close(); throw android.os.DeadObjectException() }
+                override fun cancel(operationId: String) {}
+            }); true
+        }
+        val op = operation()
+        try { assertEquals(PluginErrorCode.RUNTIME_EXITED, (runCatching { invoke(context, op) }.exceptionOrNull() as PluginException).code) }
+        finally { op.close() }
+        assertEquals(1, delivered); assertEquals(1, context.bound)
+    }
     @Test fun successfulSandboxReturnLeavesCallerOperationActiveUntilCallerClosesIt() = runBlocking {
         val context = replyingContext(PluginJson.success(JSONObject().put("items", org.json.JSONArray())))
         val op = operation()
@@ -163,7 +191,7 @@ class PluginSandboxBindingTest {
             }
             val error = runCatching { invoke(context, operation()) }.exceptionOrNull() as PluginException
             assertEquals(PluginErrorCode.RUNTIME_EXITED, error.code)
-            assertEquals(1, context.unbound)
+            assertEquals(2, context.unbound)
             assertEquals(0, testScheduler.currentTime)
         }
     }

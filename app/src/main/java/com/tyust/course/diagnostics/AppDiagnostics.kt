@@ -82,6 +82,8 @@ object AppDiagnostics {
         }
     }
 
+    internal fun savePluginReport(context: Context, report: String) { write(context, LATEST, report.take(MAX_CHARS)) }
+
     @Synchronized
     fun markStage(context: Context, stage: String) {
         // Callers supply fixed operation labels, never user input.

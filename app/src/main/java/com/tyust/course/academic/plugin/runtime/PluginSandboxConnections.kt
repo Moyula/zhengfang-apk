@@ -35,6 +35,9 @@ internal object PluginSandboxConnections {
     }
     class Lease internal constructor(private val entry: Entry, private val token: Any, private val idleMillis: Long) : Closeable {
         val ready get() = entry.ready
+        fun requireReady() = synchronized(PluginSandboxConnections) {
+            if (entry.dead) throw PluginException(PluginErrorCode.RUNTIME_EXITED, "插件服务连接已失效，请重试")
+        }
         fun invalidate(message: String) = entry.fail(message)
         override fun close() = synchronized(PluginSandboxConnections) {
             if (entry.listeners.remove(token) == null) return@synchronized

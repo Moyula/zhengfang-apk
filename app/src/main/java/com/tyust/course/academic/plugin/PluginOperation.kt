@@ -66,10 +66,13 @@ class PluginOperation(
     fun register(call: Call) { calls.add(call); try { requireActive() } catch (e: Exception) { call.cancel(); calls.remove(call); throw e } }
     fun unregister(call: Call) { calls.remove(call) }
     fun close() { active.set(false); calls.forEach(Call::cancel); calls.clear(); live.remove(this) }
-    fun failure(code: PluginErrorCode, message: String): PluginException = PluginException(
+    fun failure(code: PluginErrorCode, message: String): PluginException {
+        PluginTrace.failure(this, code)
+        return PluginException(
         if (mutationSent && code in setOf(PluginErrorCode.TIMEOUT, PluginErrorCode.CANCELLED,
             PluginErrorCode.RUNTIME_EXITED, PluginErrorCode.NETWORK_RETRYABLE, PluginErrorCode.RESOURCE_LIMIT,
             PluginErrorCode.PAGE_CHANGED, PluginErrorCode.VALIDATION_FAILED, PluginErrorCode.STALE_CONTEXT,
             PluginErrorCode.SESSION_EXPIRED, PluginErrorCode.PERMISSION_DENIED))
             PluginErrorCode.RESULT_UNKNOWN else code, message)
+    }
 }
