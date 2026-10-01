@@ -24,6 +24,10 @@ Publication serializes per channel. GitHub ref updates are non-forced and enforc
 
 `https://dl-test.hidisiwa.xyz/releases/<version>/<sha256>/app-release.apk`, `/test.json`, `/history.json`, `/index.html`. Stable uses `dl.hidisiwa.xyz` and `/stable.json`. Retain two test builds or three stable versions. First stage preserves the old manifest and APK; only a fully verified new APK becomes latest. Files over 25 MiB skip CF; stable publication still requires GitHub plus one fully verified domestic candidate. Missing files return 404, never index HTML. The download site is deployed separately from the plugin portal.
 
+Clients default to the stable channel even when installed through a legacy test migration prompt. Before enabling `legacy_test_bridge`, publish a valid stable manifest for the latest existing official release; an older stable version is a successful check, not an instruction to downgrade. The bridge now refuses migration when the default channel is unavailable. Never silently opt users into the test channel or fall back to unsigned metadata.
+
+For an already published release missing its signed channel, dispatch `release.yml` with `repair_stable_tag=v1.0.97` (or the existing official tag). This mode skips all APK builds, reuses and verifies the official APK, publishes its CF/GitHub signed metadata and a Gitee signed-only copy, and preserves `version.json` and announcements. It can therefore repair the default channel while old clients are receiving a newer explicitly authorized test update. It neither creates a formal release nor merges source branches. This entry is available before the new standalone repair workflow has reached the default branch.
+
 Manifest envelope: schemaVersion 2, keyId, Base64 of original UTF-8 payload, Base64 DER ECDSA signature. Sign/verify exact bytes. Payload binds channel, revision, package/version/minSdk, APK size/SHA-256, HTTPS mirrors, source SHA/build ID, notes/time/forceUpdate. Ordinary forceUpdate is false. APK signer is checked independently from manifest signature.
 
 ## Verification

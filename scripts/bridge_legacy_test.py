@@ -8,12 +8,31 @@ import tempfile
 from release_distribution import Budget, DeliveryError, verify_manifest, fetch, inspect_apk
 from publish_update_metadata import MetadataClient, write_json
 
+def require_default_channel(budget, version_code):
+    """A migrated client defaults to stable; do not strand it with only test.json."""
+    sources = ['https://dl.hidisiwa.xyz/stable.json',
+               'https://gitee.com/znj12345/zhengfang/raw/main/app-update-stable.json',
+               'https://raw.githubusercontent.com/znjhahaha/zhengfang-apk/updates/stable.json']
+    with tempfile.TemporaryDirectory() as root:
+        target = Path(root)/'stable.json'
+        for url in sources:
+            try:
+                fetch(url, target, budget, maximum=8)
+                stable = verify_manifest(target.read_bytes(), 'stable')
+            except (DeliveryError, OSError, ValueError):
+                continue
+            if stable['versionCode'] > version_code:
+                raise DeliveryError('A newer stable version already exists; refusing older test rollout')
+            return
+    raise DeliveryError('Default stable update channel is unavailable; repair it before migrating legacy users')
+
 def bridge(client,envelope,receipt,budget):
     payload=verify_manifest(envelope,'test')
     if payload['versionCode']!=98 or payload['versionName']!='1.0.98':
         raise DeliveryError('This one-time legacy test rollout is restricted to 1.0.98')
     for key in ['packageName','versionCode','versionName','sha256','size','sourceSha','buildId']:
         if payload[key]!=receipt[key]: raise DeliveryError('Test manifest does not match original verified APK')
+    require_default_channel(budget, payload['versionCode'])
     url=None
     with tempfile.TemporaryDirectory() as root:
         for mirror in payload['mirrors']:

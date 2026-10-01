@@ -11,6 +11,10 @@ on:
         description: '仅补传：复用此运行的成功构建，留空才构建 APK'
         required: false
         default: ''
+      repair_stable_tag:
+        description: '只修复此既有正式版的默认更新通道；不构建、不改旧版迁移提示'
+        required: false
+        default: ''
       legacy_test_bridge:
         description: '明确向旧客户端推送此次迁移测试包，仅更新兼容 version.json'
         type: boolean
@@ -48,7 +52,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: python3 scripts/distribution_preflight.py
   build:
-    if: ${{ !inputs.preflight_only }}
+    if: ${{ !inputs.preflight_only && inputs.repair_stable_tag == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -257,3 +261,48 @@ jobs:
         env:
           RESULT: ${{ job.status }}
         run: echo "Legacy test update prompt · $RESULT. Ordinary optional update; formal tag, GitHub Release and stable signed channel unchanged." >> "$GITHUB_STEP_SUMMARY"
+
+  repair-stable:
+    if: inputs.repair_stable_tag != '' && !inputs.preflight_only
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    permissions:
+      contents: write
+    concurrency:
+      group: app-updates-stable
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: distribution/package-lock.json
+      - working-directory: distribution
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Repair default signed channel from an existing official release
+        timeout-minutes: 8
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          APP_UPDATE_SIGNING_KEY: ${{ secrets.APP_UPDATE_SIGNING_KEY }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          STABLE_TAG: ${{ inputs.repair_stable_tag }}
+        run: python3 scripts/bootstrap_stable_channel.py --tag "$STABLE_TAG"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-channel-repair
+          path: |
+            repair/stable-bootstrap.json
+            repair/stable-mirror.json
+          retention-days: 7
+      - if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: echo "Default signed channel · $RESULT. Existing APK reused; legacy prompt and formal releases unchanged." >> "$GITHUB_STEP_SUMMARY"

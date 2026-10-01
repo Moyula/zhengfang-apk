@@ -29,9 +29,9 @@ class MetadataTests(unittest.TestCase):
     def setUp(self):
         self.p=payload('stable'); self.store=Store()
         self.release={'draft':False,'prerelease':False,'assets':[{'name':'app-release.apk','size':3,'digest':'sha256:'+'a'*64}]}
-    def publish(self):
+    def publish(self,**kwargs):
         with patch.object(m,'verify_manifest',return_value=self.p), patch.object(d,'verify_manifest',return_value=self.p), patch.object(m,'gh_api',return_value=self.release), patch.object(m,'fetch'):
-            return m.publish_metadata(self.store,{'signed':True},d.Budget())
+            return m.publish_metadata(self.store,{'signed':True},d.Budget(),**kwargs)
     def test_external_mirror_metadata_needs_no_gitee_attachment(self):
         result=self.publish()
         self.assertEqual(result['downloadUrl'],self.p['mirrors'][0]['url'])
@@ -80,5 +80,30 @@ class MetadataTests(unittest.TestCase):
         with patch.object(self.store,'read_json_file',wraps=self.store.read_json_file) as read:
             self.publish()
         self.assertEqual(sum(call.args[0]=='app-update-stable.json' for call in read.call_args_list),1)
+
+    def test_signed_repair_preserves_newer_legacy_migration_and_announcements(self):
+        self.store.files['version.json']={'versionCode':99,'releaseChannel':'test'}
+        before=copy.deepcopy(self.store.files)
+        self.publish(signed_only=True)
+        self.assertEqual(self.store.files['version.json'],before['version.json'])
+        self.assertEqual(self.store.files['announcement.json'],before['announcement.json'])
+        self.assertEqual([name for _,name,_ in self.store.writes],['app-update-stable.json'])
+    def test_signed_repair_still_requires_official_release(self):
+        self.release['prerelease']=True
+        with self.assertRaises(d.DeliveryError):self.publish(signed_only=True)
+        self.assertFalse(self.store.writes)
+    def test_signed_repair_checks_readback(self):
+        with patch.object(m,'write_json'):
+            with self.assertRaisesRegex(d.DeliveryError,'Signed metadata verification failed'):
+                self.publish(signed_only=True)
+    def test_signed_repair_does_not_rewrite_equal_manifest(self):
+        self.store.files['app-update-stable.json']={'signed':True}
+        self.publish(signed_only=True)
+        self.assertFalse(self.store.writes)
+    def test_signed_repair_rejects_signed_channel_rollback(self):
+        self.store.files['app-update-stable.json']={'signed':True}
+        with patch.object(m,'ensure_forward',side_effect=d.DeliveryError('rollback')):
+            with self.assertRaises(d.DeliveryError):self.publish(signed_only=True)
+        self.assertFalse(self.store.writes)
 
 if __name__ == '__main__': unittest.main()

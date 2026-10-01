@@ -436,7 +436,7 @@ def verify_with_recovery(action, check, report, budget):
             budget.remaining(1)
 
 
-def deploy_release(apk, receipt, channel, notes, output, budget, rounds=1, publish_branch=True, key_file=None, force=False):
+def deploy_release(apk, receipt, channel, notes, output, budget, rounds=1, publish_branch=True, key_file=None, force=False, publish_announcements=True):
     if not 1 <= rounds <= 3:
         raise DeliveryError('Invalid verification round count')
     report = dict(channel=channel, apk=receipt['sha256'], stages=[], events=budget.events, result='incomplete')
@@ -489,7 +489,7 @@ def deploy_release(apk, receipt, channel, notes, output, budget, rounds=1, publi
             payload = payload_for(receipt, channel, notes, mirrors, force=force)
             envelope = sign_manifest(payload, key_file)
             announcements = None
-            if channel == 'stable':
+            if channel == 'stable' and publish_announcements:
                 try:
                     announcements = merged_announcements(payload, budget)
                 except DeliveryError as e:

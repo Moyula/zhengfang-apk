@@ -29,7 +29,7 @@ def write_json(client, name, data, metadata=_UNSET):
     client.request('PUT' if metadata else 'POST', 'contents/'+name, body)
 
 
-def publish_metadata(client, envelope, budget, announcement=None):
+def publish_metadata(client, envelope, budget, announcement=None, signed_only=False):
     p = verify_manifest(envelope, 'stable')
     tag = 'v'+p['versionName']
     release = gh_api(f'repos/{REPO}/releases/tags/{tag}', budget)
@@ -49,6 +49,18 @@ def publish_metadata(client, envelope, budget, announcement=None):
                 continue
     if verified is None:
         raise DeliveryError('No verified domestic candidate; legacy metadata retained')
+    if signed_only:
+        # The legacy migration prompt can legitimately point to a newer test APK.
+        # Repair the default signed channel without rolling that prompt back.
+        metadata, current = client.read_json_file('app-update-stable.json', allow_missing=True)
+        if current:
+            ensure_forward(verify_manifest(current, 'stable'), p)
+        if current != envelope:
+            write_json(client, 'app-update-stable.json', envelope, metadata)
+        _, stored = client.read_json_file('app-update-stable.json')
+        if stored != envelope:
+            raise DeliveryError('Signed metadata verification failed')
+        return p
     metadata, current = client.read_json_file('version.json', allow_missing=True)
     if current and (current.get('versionCode', 0) > p['versionCode'] or
         (current.get('versionCode') == p['versionCode'] and current.get('sha256') not in (None, p['sha256']))):

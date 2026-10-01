@@ -12,7 +12,7 @@ from release_distribution import Budget,DeliveryError
 class BridgeTests(unittest.TestCase):
     def setUp(self):self.p=payload();self.store=Store()
     def run_bridge(self,receipt=None):
-        with patch.object(b,'verify_manifest',return_value=self.p),patch.object(b,'fetch'):
+        with patch.object(b,'verify_manifest',return_value=self.p),patch.object(b,'fetch'),patch.object(b,'require_default_channel'):
             return b.bridge(self.store,{},receipt or self.p,Budget())
     def test_old_clients_receive_optional_test_update_without_attachment(self):
         result=self.run_bridge();self.assertEqual(result['versionCode'],98);self.assertFalse(result['forceUpdate'])
@@ -35,5 +35,21 @@ class BridgeTests(unittest.TestCase):
         self.store.files['version.json']={'versionCode':98,'sha256':'c'*64}
         with self.assertRaises(DeliveryError):self.run_bridge()
         self.assertFalse(self.store.writes)
+    def test_missing_default_channel_prevents_legacy_migration(self):
+        with patch.object(b,'verify_manifest',return_value=self.p),patch.object(b,'fetch',side_effect=DeliveryError('404')):
+            with self.assertRaisesRegex(DeliveryError,'Default stable update channel'):
+                b.bridge(self.store,{},self.p,Budget())
+        self.assertFalse(self.store.writes)
+    def test_unreachable_primary_uses_verified_fallback(self):
+        def fetch(url,target,*args,**kwargs):
+            if 'dl.hidisiwa' in url: raise DeliveryError('timeout')
+            Path(target).write_bytes(b'signed')
+        with patch.object(b,'fetch',side_effect=fetch),patch.object(b,'verify_manifest',return_value={'versionCode':97}) as verify:
+            b.require_default_channel(Budget(),98)
+        verify.assert_called_once_with(b'signed','stable')
+    def test_newer_stable_blocks_older_test_rollout(self):
+        with patch.object(b,'fetch',side_effect=lambda url,target,*a,**kw:Path(target).write_bytes(b'signed')),patch.object(b,'verify_manifest',return_value={'versionCode':99}):
+            with self.assertRaisesRegex(DeliveryError,'newer stable'):
+                b.require_default_channel(Budget(),98)
 
 if __name__=='__main__':unittest.main()
