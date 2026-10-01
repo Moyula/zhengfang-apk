@@ -33,6 +33,7 @@ fun SchoolSearchPicker(schools: List<SchoolConfig>, selected: SchoolConfig?, ena
         onManage = { open = false; onManage() })
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SchoolSearchDialog(schools: List<SchoolConfig>, onDismiss: () -> Unit,
     onSelected: (SchoolConfig) -> Unit, onAdded: () -> Unit, onAddManually: (String) -> Unit,
@@ -115,30 +116,30 @@ private fun SchoolSearchDialog(schools: List<SchoolConfig>, onDismiss: () -> Uni
         }
     }
     SystemDialog(onDismissRequest = ::dismiss, title = { Text("搜索学校") },
-        confirmButton = { TextButton(onClick = ::dismiss) { Text("关闭") } }) {
+        confirmButton = { SystemDialogButton(primary = true, onClick = ::dismiss) { Text("关闭") } }) {
         Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             GlassTextField(query, { cancel(); query = it }, Modifier.fillMaxWidth(), placeholder = "输入学校名称",
                 leadingIcon = Icons.Default.Search, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { submit() }))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = ::submit, enabled = query.isNotBlank() && !busy) { Text("搜索") }
-                TextButton(onClick = { manual(query.trim()) }) { Text("手动添加") }
-                TextButton(onClick = { cancel(); onManage() }) { Text("管理学校") }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SystemDialogButton(onClick = ::submit, enabled = query.isNotBlank() && !busy) { Text("搜索") }
+                SystemDialogButton(onClick = { manual(query.trim()) }) { Text("手动添加") }
+                SystemDialogButton(onClick = { cancel(); onManage() }) { Text("管理学校") }
             }
             if (loading) Text("正在查询学校适配，本地学校仍可选择…", style = MaterialTheme.typography.bodySmall)
             problem?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            if (!loading && !verified) TextButton(onClick = { reload++ }) { Text("重试目录查询") }
+            if (!loading && !verified) SystemDialogButton(onClick = { reload++ }) { Text("重试目录查询") }
             if (busy) Text("正在处理适配；可关闭面板取消学校切换。", style = MaterialTheme.typography.bodySmall)
             if (rows.isEmpty() && verified && !loading) Text("没有匹配学校，点击搜索可添加。")
             rows.forEach { row ->
                 InsetGroupedSection(header = row.school.name) {
                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(PluginSchoolMatcher.endpoint(row.school).toString(), style = MaterialTheme.typography.bodySmall)
-                        if (row.configured) TextButton(onClick = { cancel(); onSelected(row.school) }, enabled = !busy) { Text("选择已配置学校") }
+                        if (row.configured) SystemDialogButton(onClick = { cancel(); onSelected(row.school) }, enabled = !busy) { Text("选择已配置学校") }
                         if (row.providers.size > 1) Text("选择一个适配提供者", style = MaterialTheme.typography.bodySmall)
                         row.providers.forEach { provider ->
                             val status = if (provider.installed) "已安装" else provider.incompatibleReason ?: "可安装"
-                            TextButton(onClick = { choose(row, provider) }, enabled = !busy && (provider.installed || provider.incompatibleReason == null)) {
+                            SystemDialogButton(onClick = { choose(row, provider) }, enabled = !busy && (provider.installed || provider.incompatibleReason == null)) {
                                 Text("${provider.name} ${provider.version} · $status")
                             }
                         }
@@ -148,8 +149,8 @@ private fun SchoolSearchDialog(schools: List<SchoolConfig>, onDismiss: () -> Uni
         }
     }
     pending?.let { item -> SystemDialog(onDismissRequest = { cancel() }, title = { Text("安装 ${item.pkg.manifest.name}") },
-        confirmButton = { TextButton(onClick = { pending = null; activate(item, true) }) { Text("确认安装") } },
-        dismissButton = { TextButton(onClick = { cancel() }) { Text("取消") } }) {
+        confirmButton = { SystemDialogButton(primary = true, onClick = { pending = null; activate(item, true) }) { Text("确认安装") } },
+        dismissButton = { SystemDialogButton(onClick = { cancel() }) { Text("取消") } }) {
         Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("版本 ${item.pkg.manifest.version}")
             Text("权限：" + item.pkg.manifest.permissions.joinToString("、").ifBlank { "无额外权限" })

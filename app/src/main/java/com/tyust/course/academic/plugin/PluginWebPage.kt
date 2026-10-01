@@ -1,5 +1,6 @@
 package com.tyust.course.academic.plugin
 
+import com.tyust.course.ui.system.SystemDialogButton
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
@@ -66,7 +67,7 @@ import org.json.JSONObject
     BackHandler(canGoBack) { revoke(); web?.goBack() }
     Column(Modifier.fillMaxSize()) {
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (problem.isNotBlank()) Row(Modifier.padding(12.dp)) { Text(problem, modifier = Modifier.weight(1f)); TextButton(onClick = { problem = ""; loading = true; if (web == null) webGeneration++ else web?.reload() }) { Text("重试") } }
+        if (problem.isNotBlank()) Row(Modifier.padding(12.dp)) { Text(problem, modifier = Modifier.weight(1f)); SystemDialogButton(onClick = { problem = ""; loading = true; if (web == null) webGeneration++ else web?.reload() }) { Text("重试") } }
         key(webGeneration) {
         AndroidView(modifier = Modifier.weight(1f).fillMaxWidth(), factory = { context ->
             WebView(context).also { view ->

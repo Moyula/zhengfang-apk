@@ -278,29 +278,29 @@ class PluginDeveloperActivity : ComponentActivity() {
         }
         if (confirmWrite) SystemDialog(onDismissRequest = { confirmWrite = false }, title = { Text("确认测试操作") },
             content = { Text("此操作会执行所选插件接口。模拟插件只修改模拟数据，真实服务可能改变账号记录。") },
-            confirmButton = { TextButton({ confirmWrite = false; runOperation(true) }) { Text("确认执行") } },
-            dismissButton = { TextButton({ confirmWrite = false }) { Text("取消") } })
+            confirmButton = { SystemDialogButton(primary = true, onClick = { confirmWrite = false; runOperation(true) }) { Text("确认执行") } },
+            dismissButton = { SystemDialogButton(onClick = { confirmWrite = false }) { Text("取消") } })
         uninstall?.let { pkg -> SystemDialog(onDismissRequest = { uninstall = null }, title = { Text(if (AcademicProviderRegistry.installedOverride(pkg)) "卸载 ${pkg.manifest.name}？" else "停用 ${pkg.manifest.name}？") },
-            confirmButton = { TextButton(onClick = { uninstall = null; scope.launch {
+            confirmButton = { SystemDialogButton(primary = true, onClick = { uninstall = null; scope.launch {
                 busy = true
                 try { val installed = AcademicProviderRegistry.installedOverride(pkg)
                     withContext(Dispatchers.IO) { AcademicProviderRegistry.removePlugin(pkg) }; refresh(); selected = null
                     feedback = if (installed) "已卸载插件" else "已停用内置插件"
                 } catch (e: Exception) { feedback = e.message.orEmpty() } finally { busy = false }
-            } }) { Text("确认") } }, dismissButton = { TextButton({ uninstall = null }) { Text("取消") } }) {
+            } }) { Text("确认") } }, dismissButton = { SystemDialogButton(onClick = { uninstall = null }) { Text("取消") } }) {
                 Text(AcademicProviderRegistry.removalDescription(pkg))
             }
         }
         bindCandidate?.let { pkg -> SystemDialog(onDismissRequest = { bindCandidate = null }, title = { Text("使用 ${pkg.manifest.name}") },
             content = { Text("将此适配添加到学校列表，之后可在登录页选择。已有学校和账号 ID 保持不变。") },
-            confirmButton = { TextButton({
+            confirmButton = { SystemDialogButton(primary = true, onClick = {
                 val school = AcademicProviderRegistry.school(pkg)
                 val user = UserManager.getInstance()
                 if (user.getSchoolById(school.id) != null) user.updateSchoolConfig(school) else user.addCustomSchool(school)
                 setResult(RESULT_OK, android.content.Intent().putExtra(PluginCenterActivity.EXTRA_CHANGED, true)
                     .putExtra(PluginCenterActivity.EXTRA_TARGET_SCHOOL, school.id))
                 feedback = "已添加学校，请从学校列表选择并登录"; bindCandidate = null
-            }) { Text("使用适配") } }, dismissButton = { TextButton({ bindCandidate = null }) { Text("取消") } }) }
+            }) { Text("使用适配") } }, dismissButton = { SystemDialogButton(onClick = { bindCandidate = null }) { Text("取消") } }) }
     }
     @Composable private fun ForwardIcon() = Icon(Icons.Outlined.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     private fun packageKind(pkg: PluginPackage) = when (pkg.manifest.kind) {

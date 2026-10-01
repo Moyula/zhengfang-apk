@@ -1312,12 +1312,12 @@ private fun SystemDialogContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (dismissButton != null) {
-                        Box(modifier = Modifier.weight(1f)) {
+                        Box(modifier = Modifier.weight(1f), propagateMinConstraints = true) {
                             dismissButton()
                         }
                     }
                     if (confirmButton != null) {
-                        Box(modifier = Modifier.weight(1f)) {
+                        Box(modifier = Modifier.weight(1f), propagateMinConstraints = true) {
                             confirmButton()
                         }
                     }

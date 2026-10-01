@@ -100,16 +100,16 @@ class ServicePluginActivity : ComponentActivity() {
         requestPrompt?.let { prompt ->
             SystemDialog(onDismissRequest = { prompt.answer.complete(false) }, title = { Text("确认未审核端点") },
                 content = { Text("${prompt.method} ${prompt.url}\n此端点未由教务提供者声明为只读，可能改变服务器数据。仅允许本次请求？") },
-                confirmButton = { TextButton({ prompt.answer.complete(true) }) { Text("仅本次") } },
-                dismissButton = { TextButton({ prompt.answer.complete(false) }) { Text("拒绝") } })
+                confirmButton = { SystemDialogButton(primary = true, onClick = { prompt.answer.complete(true) }) { Text("仅本次") } },
+                dismissButton = { SystemDialogButton(onClick = { prompt.answer.complete(false) }) { Text("拒绝") } })
         }
         readStatePrompt?.let { prompt ->
             SystemDialog(onDismissRequest = { prompt.answer.complete(null) }, title = { Text(prompt.rule.getString("title")) },
                 content = { Text("允许此已审核的状态更新？记住后，刷新时不再重复询问。\n${prompt.rule.getString("method")} ${prompt.rule.getString("origin")}${prompt.rule.getString("path")}\n仅适用于当前账号、此端点及其审核过的参数范围。") },
-                confirmButton = { Row {
-                    TextButton({ prompt.answer.complete(false) }) { Text("仅本次") }
-                    TextButton({ prompt.answer.complete(true) }) { Text("允许并记住") }
-                } }, dismissButton = { TextButton({ prompt.answer.complete(null) }) { Text("拒绝") } })
+                confirmButton = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SystemDialogButton(onClick = { prompt.answer.complete(false) }) { Text("仅本次") }
+                    SystemDialogButton(onClick = { prompt.answer.complete(true) }) { Text("允许并记住") }
+                } }, dismissButton = { SystemDialogButton(onClick = { prompt.answer.complete(null) }) { Text("拒绝") } })
         }
     }
 
@@ -241,7 +241,7 @@ class ServicePluginActivity : ComponentActivity() {
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("service-busy"))
                 if (message.isNotBlank()) {
                     Text(message, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("service-message"))
-                    TextButton(onClick = { PluginFeedback.open(this@ServicePluginActivity, pkg) }) { Text("快捷反馈") }
+                    SystemDialogButton(onClick = { PluginFeedback.open(this@ServicePluginActivity, pkg) }) { Text("快捷反馈") }
                 }
                 if (!loggedIn && runtime.sharesAcademicSession) {
                     ServiceAcademicEntry(academicEntry, busy, onAuthorize = { run {
@@ -334,7 +334,7 @@ class ServicePluginActivity : ComponentActivity() {
         pendingDisclosure?.let { url ->
             SystemDialog(onDismissRequest = { pendingDisclosure = null }, title = { Text("允许向网站提供个人数据") },
                 content = { Text("接收网站：$url。网站接收后，App 无法控制其后续使用。") },
-                confirmButton = { TextButton({
+                confirmButton = { SystemDialogButton(primary = true, onClick = {
                     pendingDisclosure = null
                     try {
                         runtime.requireActive()
@@ -342,14 +342,14 @@ class ServicePluginActivity : ComponentActivity() {
                         dataGuard.authorize(destination); dataGuard.requireNetwork(destination)
                         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                     } catch (e: Exception) { message = e.message.orEmpty() }
-                }) { Text("允许此网站") } }, dismissButton = { TextButton({ pendingDisclosure = null }) { Text("拒绝") } })
+                }) { Text("允许此网站") } }, dismissButton = { SystemDialogButton(onClick = { pendingDisclosure = null }) { Text("拒绝") } })
         }
         pendingAcademicAuthorization?.let { (description, answer) ->
             SystemDialog(onDismissRequest = { answer.complete(null) }, title = { Text("授权使用教务登录") },
-                content = { Text(description) }, confirmButton = { Row {
-                    TextButton({ answer.complete("once") }) { Text("仅本次") }
-                    TextButton({ answer.complete("remember") }) { Text("允许并记住") }
-                } }, dismissButton = { TextButton({ answer.complete(null) }) { Text("拒绝") } })
+                content = { Text(description) }, confirmButton = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SystemDialogButton(onClick = { answer.complete("once") }) { Text("仅本次") }
+                    SystemDialogButton(onClick = { answer.complete("remember") }) { Text("允许并记住") }
+                } }, dismissButton = { SystemDialogButton(onClick = { answer.complete(null) }) { Text("拒绝") } })
         }
         pendingAction?.let { action ->
             val declaration = ServicePluginContract.action(pkg.manifest, action.getString("actionId"))
@@ -367,14 +367,14 @@ class ServicePluginActivity : ComponentActivity() {
                             "${field.getString("label")}：${label.take(160)}"
                         }
                     }.joinToString("\n"), style = MaterialTheme.typography.bodySmall)
-                } }, confirmButton = { Row {
-                    TextButton({ pendingAction = null; performAction(action, true) }) { Text("仅本次") }
-                    if (runtime.reusableAction(action.getString("actionId"))) TextButton({
+                } }, confirmButton = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SystemDialogButton(onClick = { pendingAction = null; performAction(action, true) }) { Text("仅本次") }
+                    if (runtime.reusableAction(action.getString("actionId"))) SystemDialogButton(onClick = {
                         try { runtime.rememberAction(action.getString("actionId")); pendingAction = null; performAction(action, false) }
                         catch (e: Exception) { message = e.message.orEmpty() }
                     }) { Text("记住此操作范围") }
                 } },
-                dismissButton = { TextButton({ pendingAction = null }) { Text("取消") } })
+                dismissButton = { SystemDialogButton(onClick = { pendingAction = null }) { Text("取消") } })
         }
     }
 

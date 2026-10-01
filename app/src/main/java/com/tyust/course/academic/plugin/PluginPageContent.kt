@@ -1,5 +1,6 @@
 package com.tyust.course.academic.plugin
 
+import com.tyust.course.ui.system.SystemDialogButton
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -47,7 +48,7 @@ internal data class PagePrompt(val title: String, val message: String, val chall
         PluginPlatformContract.requirements(command, PluginPages.capabilities()).isEmpty()
     }.getOrDefault(false)
     if (pkg == null || (page == null && !commandAllowed) || commandId != null && !commandAllowed) {
-        Column(Modifier.fillMaxSize().padding(20.dp)) { Text("页面已移除或插件已停用"); TextButton(onClick = onBack) { Text("返回") } }; return
+        Column(Modifier.fillMaxSize().padding(20.dp)) { Text("页面已移除或插件已停用"); SystemDialogButton(onClick = onBack) { Text("返回") } }; return
     }
     val template = page?.let { NativePluginContract.page(pkg.manifest, it.templateId) }
     val serverId = template?.optString("serverId")?.takeIf { it.isNotBlank() }
@@ -87,7 +88,7 @@ internal data class PagePrompt(val title: String, val message: String, val chall
                 else lifetime.status = "页面已恢复；上次操作结果需先核对，请勿重复提交"
                 commandStarted = true
             }
-            Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState())) { Text(lifetime.status); TextButton(onClick = onBack) { Text("返回") } }
+            Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState())) { Text(lifetime.status); SystemDialogButton(onClick = onBack) { Text("返回") } }
         } else {
             val native = lifetime.native()
             LaunchedEffect(route) { if (native.snapshot.value.instance.isEmpty()) native.open(route, pageParams); lifetime.viewport?.let(native::viewportChanged) }
@@ -106,7 +107,7 @@ internal data class PagePrompt(val title: String, val message: String, val chall
                 if (lifetime.viewport?.toString() != viewport.toString()) { lifetime.viewport = viewport; if (lifetime.foreground) native.viewportChanged(viewport) }
             }), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (snapshot.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                if (snapshot.error.isNotBlank()) { Text(snapshot.error, color = MaterialTheme.colorScheme.error); TextButton(onClick = { native.open(route, pageParams) }) { Text("重试") } }
+                if (snapshot.error.isNotBlank()) { Text(snapshot.error, color = MaterialTheme.colorScheme.error); SystemDialogButton(onClick = { native.open(route, pageParams) }) { Text("重试") } }
                 snapshot.view?.let { view -> NativePluginNode(view, host.files, Modifier.fillMaxSize()) { event, gesture -> native.event(snapshot.instance, event, gesture) } }
             }
         }
@@ -136,16 +137,16 @@ internal data class PagePrompt(val title: String, val message: String, val chall
             confirmButton = {
                 if (p.directChoices) Row {
                     p.choices.filter { it.first != "deny" }.reversed().forEach { (id, label) ->
-                        TextButton(onClick = { p.result.complete(JSONObject().put("choice", id)) }) { Text(label) }
+                        SystemDialogButton(onClick = { p.result.complete(JSONObject().put("choice", id)) }) { Text(label) }
                     }
-                } else TextButton(enabled = valid, onClick = { p.result.complete(if (p.choices.isNotEmpty()) JSONObject().put("choice", choice) else if (p.challenge == null) JSONObject() else JSONObject().put("values", JSONObject(values.toMap())).put("remember", save)) }) { Text("确认") }
+                } else SystemDialogButton(enabled = valid, onClick = { p.result.complete(if (p.choices.isNotEmpty()) JSONObject().put("choice", choice) else if (p.challenge == null) JSONObject() else JSONObject().put("values", JSONObject(values.toMap())).put("remember", save)) }) { Text("确认") }
             },
-            dismissButton = { TextButton(onClick = { p.result.complete(null) }) { Text(if (p.directChoices) "拒绝" else "取消") } }) {
+            dismissButton = { SystemDialogButton(onClick = { p.result.complete(null) }) { Text(if (p.directChoices) "拒绝" else "取消") } }) {
             Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(p.message)
                 p.image?.let { coil.compose.AsyncImage(it, "认证图片", Modifier.fillMaxWidth().heightIn(max = 160.dp)) }
                 if (!p.directChoices) p.choices.forEach { (id, label) -> Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    RadioButton(selected = choice == id, onClick = { choice = id }); TextButton(onClick = { choice = id }) { Text(label) }
+                    RadioButton(selected = choice == id, onClick = { choice = id }); SystemDialogButton(onClick = { choice = id }) { Text(label) }
                 } }
                 fields.forEach { field -> val id = field.getString("id")
                     OutlinedTextField(values[id].orEmpty(), { if (it.length <= 2000) values[id] = it }, label = { Text(field.getString("label")) },

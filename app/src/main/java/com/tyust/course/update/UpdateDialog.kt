@@ -1,5 +1,6 @@
 package com.tyust.course.update
 
+import com.tyust.course.ui.system.SystemDialogButton
 import android.os.Build
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -53,13 +54,13 @@ fun UpdateDialog(manager: UpdateManager = UpdateManager.getInstance(LocalContext
                 LinearProgressIndicator(progress = { state.progress / 100f }, modifier = Modifier.fillMaxWidth())
                 Text("${state.progress}% · ${"%.1f".format(state.bytes / 1048576.0)} / ${"%.1f".format((info?.size ?: 0) / 1048576.0)} MiB", style = MaterialTheme.typography.bodySmall)
             }
-            if (active || state.phase == UpdateManager.Phase.PAUSED) TextButton(onClick = { manager.pauseDownload(cancel = true) }) { Text("取消下载") }
+            if (active || state.phase == UpdateManager.Phase.PAUSED) SystemDialogButton(onClick = { manager.pauseDownload(cancel = true) }) { Text("取消下载") }
             if (canDownload && info != null) {
-                TextButton(onClick = { showMirrors = !showMirrors }) { Text(if (showMirrors) "收起下载线路" else "下载线路与浏览器下载") }
+                SystemDialogButton(onClick = { showMirrors = !showMirrors }) { Text(if (showMirrors) "收起下载线路" else "下载线路与浏览器下载") }
                 if (showMirrors) info.mirrors.forEach { mirror ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        TextButton(enabled = !active && canDownload, onClick = { manager.startDownload(mirror.id, state.testChannel) }) { Text(mirror.name) }
-                        TextButton(onClick = { manager.openBrowser(mirror) }) { Text("浏览器打开") }
+                        SystemDialogButton(enabled = !active && canDownload, onClick = { manager.startDownload(mirror.id, state.testChannel) }) { Text(mirror.name) }
+                        SystemDialogButton(onClick = { manager.openBrowser(mirror) }) { Text("浏览器打开") }
                     }
                 }
             }

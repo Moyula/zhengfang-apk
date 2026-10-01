@@ -82,13 +82,13 @@ import org.json.JSONObject
         }
         Spacer(Modifier.height(LocalAppOverlayBottomInset.current))
     }
-    replace?.let { page -> SystemDialog(onDismissRequest = { replace = null }, title = { Text("替换哪个导航入口") }, confirmButton = { TextButton(onClick = { replace = null }) { Text("取消") } }) {
-        Column { pinned.filter { it != PluginPageRegistry.SETTINGS }.forEach { id -> TextButton(onClick = { registry.customize(pinned.map { if (it == id) page.id else it }); replace = null }) { Text(registry.page(id)?.title ?: id) } } }
+    replace?.let { page -> SystemDialog(onDismissRequest = { replace = null }, title = { Text("替换哪个导航入口") }, confirmButton = { SystemDialogButton(primary = true, onClick = { replace = null }) { Text("取消") } }) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { pinned.filter { it != PluginPageRegistry.SETTINGS }.forEach { id -> SystemDialogButton(onClick = { registry.customize(pinned.map { if (it == id) page.id else it }); replace = null }) { Text(registry.page(id)?.title ?: id) } } }
     } }
     settings?.let { pkg -> PluginSettingsDialog(pkg) { settings = null } }
     clearData?.let { pkg -> SystemDialog(onDismissRequest = { clearData = null }, title = { Text("清理 ${pkg.manifest.name} 的本地数据") },
-        confirmButton = { TextButton(onClick = { runCatching { PluginLocalData.clear(context, pkg) }.onSuccess { GlassToaster.show("本地数据已清理") }.onFailure { GlassToaster.show(it.message.orEmpty()) }; clearData = null }) { Text("清理") } },
-        dismissButton = { TextButton(onClick = { clearData = null }) { Text("取消") } }) {
+        confirmButton = { SystemDialogButton(primary = true, onClick = { runCatching { PluginLocalData.clear(context, pkg) }.onSuccess { GlassToaster.show("本地数据已清理") }.onFailure { GlassToaster.show(it.message.orEmpty()) }; clearData = null }) { Text("清理") } },
+        dismissButton = { SystemDialogButton(onClick = { clearData = null }) { Text("取消") } }) {
         Text("清理此插件的本地设置、文件、缓存、服务登录和数据读取授权。服务器上的帖子、校园卡记录等业务数据会保留。未完成的任务需先处理。")
     } }
 }
@@ -103,13 +103,13 @@ import org.json.JSONObject
     val values = remember(pkg.digest, keys) { mutableStateMapOf<String, String>() }
     val defaults = remember(pkg.digest, keys) { PluginSettings.values(context, pkg) }
     val legacy = remember(pkg.digest, keys) { PluginSettings.legacyServiceValues(context, pkg) }
-    SystemDialog(onDismissRequest = close, title = { Text("${pkg.manifest.name} · 设置") }, confirmButton = { TextButton(onClick = {
+    SystemDialog(onDismissRequest = close, title = { Text("${pkg.manifest.name} · 设置") }, confirmButton = { SystemDialogButton(primary = true, onClick = {
         runCatching { PluginSettings.write(context, pkg, keys, values.toMap()) }.onFailure { GlassToaster.show(it.message.orEmpty()) }; close()
-    }) { Text("保存") } }, dismissButton = { TextButton(onClick = close) { Text("取消") } }) {
+    }) { Text("保存") } }, dismissButton = { SystemDialogButton(onClick = close) { Text("取消") } }) {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
             if (legacy.isNotEmpty()) {
                 Text("检测到按学校账号保存的旧版服务设置。确认属于当前服务账号后，可以复制；原记录会保留。")
-                TextButton(onClick = { values.putAll(legacy) }) { Text("复制旧版服务设置到当前账号") }
+                SystemDialogButton(onClick = { values.putAll(legacy) }) { Text("复制旧版服务设置到当前账号") }
             }
             declarations.forEach { setting ->
             val id = setting.getString("id"); val value = values[id] ?: defaults.opt(id)?.takeIf { it != JSONObject.NULL }?.toString().orEmpty()
