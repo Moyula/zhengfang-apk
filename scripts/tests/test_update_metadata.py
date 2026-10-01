@@ -105,5 +105,15 @@ class MetadataTests(unittest.TestCase):
         with patch.object(m,'ensure_forward',side_effect=d.DeliveryError('rollback')):
             with self.assertRaises(d.DeliveryError):self.publish(signed_only=True)
         self.assertFalse(self.store.writes)
+    def test_real_gitee_missing_path_empty_list_is_creatable(self):
+        client=m.MetadataClient('test-not-a-real-token')
+        with patch.object(client,'request',return_value=[]):
+            self.assertEqual(client.read_json_file('app-update-stable.json',allow_missing=True),(None,None))
+            with self.assertRaises(d.DeliveryError):client.read_json_file('app-update-stable.json')
+    def test_unexpected_content_shape_is_not_treated_as_missing(self):
+        client=m.MetadataClient('test-not-a-real-token')
+        for value in [[{'name':'file'}],{'content':None,'sha':'x'},{}]:
+            with patch.object(client,'request',return_value=value):
+                with self.assertRaises(d.DeliveryError):client.read_json_file('app-update-stable.json',allow_missing=True)
 
 if __name__ == '__main__': unittest.main()

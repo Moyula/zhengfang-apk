@@ -13,8 +13,13 @@ from publish_announcement import publish_release
 class MetadataClient(Gitee):
     def read_json_file(self, name, allow_missing=False):
         metadata = self.request('GET', f'contents/{name}?ref=main', allow_missing=allow_missing)
-        if metadata is None:
+        # Gitee returns HTTP 200 with [] for some missing content paths.
+        if metadata is None or metadata == []:
+            if not allow_missing:
+                raise DeliveryError('Required Gitee metadata is missing: '+name)
             return None, None
+        if not isinstance(metadata, dict) or not isinstance(metadata.get('content'), str) or not isinstance(metadata.get('sha'), str):
+            raise DeliveryError('Unexpected Gitee metadata response: '+name)
         return metadata, json.loads(base64.b64decode(metadata['content']))
 
 

@@ -15,6 +15,10 @@ on:
         description: '只修复此既有正式版的默认更新通道；不构建、不改旧版迁移提示'
         required: false
         default: ''
+      repair_stable_metadata_only:
+        description: '默认通道镜像已成功时，仅补传 Gitee 签名小文件'
+        type: boolean
+        default: false
       legacy_test_bridge:
         description: '明确向旧客户端推送此次迁移测试包，仅更新兼容 version.json'
         type: boolean
@@ -293,7 +297,13 @@ jobs:
           APP_UPDATE_SIGNING_KEY: ${{ secrets.APP_UPDATE_SIGNING_KEY }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           STABLE_TAG: ${{ inputs.repair_stable_tag }}
-        run: python3 scripts/bootstrap_stable_channel.py --tag "$STABLE_TAG"
+          METADATA_ONLY: ${{ inputs.repair_stable_metadata_only }}
+        run: |
+          if [ "$METADATA_ONLY" = true ]; then
+            python3 scripts/bootstrap_stable_channel.py --tag "$STABLE_TAG" --metadata-only
+          else
+            python3 scripts/bootstrap_stable_channel.py --tag "$STABLE_TAG"
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
