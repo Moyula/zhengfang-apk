@@ -1,5 +1,5 @@
 name: Isolated plugin audit
-run-name: Plugin audit · ${{ inputs.self_test && 'toolchain self-test' || inputs.draft_id }}
+run-name: Plugin audit · ${{ inputs.self_test && 'toolchain self-test' || format('{0} · {1}', inputs.draft_id, inputs.nonce) }}
 on:
   workflow_dispatch:
     inputs:
