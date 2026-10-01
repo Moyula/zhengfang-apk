@@ -1,6 +1,6 @@
 # App download distribution
 
-Test build 1.0.98; API 3 / SDK 3.2.7 unchanged. Test acceptance is required before promotion. GitHub holds the official immutable APK; free Cloudflare Workers Static Assets holds verified copies. No R2 or paid fallback.
+App delivery; API 3 / SDK 3.2.7 unchanged. Promote the verified test artifact when the user requests default-channel release. GitHub holds the official immutable APK; free Cloudflare Workers Static Assets holds verified copies. No R2 or paid fallback.
 
 ## Credentials
 
@@ -17,6 +17,8 @@ Cloudflare token: account Workers Scripts Edit and Account Settings Read, zone W
 - `repair-delivery.yml`: choose `mirrors` or `metadata` and an existing formal tag. No APK build or signing. Older metadata repairs cannot replace a newer version. Metadata repair does not upload an APK.
 - `sync-gitee-source.yml`: separately fast-forward main source to Gitee `github-source`, preserving the independent metadata commits on Gitee main. Never force-push or move tags.
 - `sync-gitee.yml`: optional Gitee APK attachment only, total three-minute script budget. No version JSON, announcements or source writes.
+
+The old-client Gitee `version.json` migration entry remains on 1.0.98. New clients use signed `stable.json` / `app-update-stable.json`, which can advance independently (including 1.0.99). Promotion defaults `preserve_legacy_entry=true`, writing only the Gitee signed manifest; do not point the legacy file at a different version unless the user requests changing the migration route. Keep the immutable test98 APK while that entry references it.
 
 Publication serializes per channel. GitHub ref updates are non-forced and enforce version/revision monotonicity. A failed/lost upload response is checked against public content before retry, at most one retry. Gitee attachment upload is attempted once. All subprocesses have deadlines; CLI output is captured and redacted, reports contain stage/time/status only.
 

@@ -13,6 +13,10 @@ on:
         description: '同步旧客户端版本提示和公告，不上传 Gitee APK'
         type: boolean
         default: true
+      preserve_legacy_entry:
+        description: '保留旧版 version.json 的98迁移入口，仅更新新版签名清单'
+        type: boolean
+        default: true
 permissions:
   contents: write
   actions: read
@@ -105,4 +109,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: python3 scripts/publish_update_metadata.py --manifest report/stable-mirror.json
+          PRESERVE_LEGACY: ${{ inputs.preserve_legacy_entry }}
+        run: |
+          args=()
+          if [ "$PRESERVE_LEGACY" = true ]; then args+=(--signed-only); fi
+          python3 scripts/publish_update_metadata.py --manifest report/stable-mirror.json "${args[@]}"

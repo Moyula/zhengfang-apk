@@ -88,13 +88,14 @@ def publish_metadata(client, envelope, budget, announcement=None, signed_only=Fa
 
 def main():
     parser = argparse.ArgumentParser(); parser.add_argument('--manifest', type=Path, required=True); parser.add_argument('--announcement', type=Path)
+    parser.add_argument('--signed-only', action='store_true', help='Preserve the legacy version.json migration entry')
     args = parser.parse_args(); budget = Budget(180)
     envelope = json.loads(args.manifest.read_text())
     # A deployment report can be supplied directly by the publisher.
     if 'manifest' in envelope:
         envelope = envelope['manifest']
     publish_metadata(MetadataClient(os.environ.get('GITEE_TOKEN', ''), budget), envelope, budget,
-        json.loads(args.announcement.read_text()) if args.announcement else None)
+        json.loads(args.announcement.read_text()) if args.announcement else None, signed_only=args.signed_only)
 
 if __name__ == '__main__':
     main()

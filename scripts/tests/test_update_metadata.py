@@ -115,5 +115,11 @@ class MetadataTests(unittest.TestCase):
         for value in [[{'name':'file'}],{'content':None,'sha':'x'},{}]:
             with patch.object(client,'request',return_value=value):
                 with self.assertRaises(d.DeliveryError):client.read_json_file('app-update-stable.json',allow_missing=True)
+    def test_cli_signed_only_preserves_legacy_route(self):
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'report.json';path.write_text(json.dumps({'manifest':{'signed':True}}))
+            with patch.object(sys,'argv',['publish_update_metadata.py','--manifest',str(path),'--signed-only']),patch.object(m,'MetadataClient',return_value=self.store),patch.object(m,'publish_metadata') as publish:
+                m.main()
+            self.assertTrue(publish.call_args.kwargs['signed_only'])
 
 if __name__ == '__main__': unittest.main()
