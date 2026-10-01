@@ -156,12 +156,45 @@ class DeliveryTests(unittest.TestCase):
                 if url.endswith('/history.json'): return False
                 if url.endswith('/test.json'): Path(target).write_text(json.dumps(old)); return True
                 Path(target).write_bytes(b'old'); return True
-            with patch.object(d,'cf_project_exists',return_value=True), patch.object(d,'verify_manifest',side_effect=lambda e,c:e), patch.object(d,'fetch',side_effect=fetch):
+            with patch.object(d,'migration_pin',return_value=None), patch.object(d,'cf_project_exists',return_value=True), patch.object(d,'verify_manifest',side_effect=lambda e,c:e), patch.object(d,'fetch',side_effect=fetch):
                 previous=d.prepare_static(apk,new,'test',root/'site',d.Budget())
             self.assertEqual(len(previous),1)
             self.assertTrue((root/'site/releases/1.0.97'/('c'*64)/'app-release.apk').exists())
             self.assertTrue((root/'site/releases/1.0.98'/('a'*64)/'app-release.apk').exists())
             self.assertEqual(json.loads((root/'site/test.json').read_text())['versionCode'],97)
+    def test_legacy_pin_is_the_signed_original_test98(self):
+        envelope, p = d.migration_pin('test')
+        self.assertEqual(p['versionCode'], 98)
+        self.assertEqual(p['sha256'], '501d8f8d0b6a8a738c4dc20f9e0cb05633e5d31c64ef8299138d39771e377c36')
+        self.assertIsNone(d.migration_pin('stable'))
+
+    def test_new_tests_preserve_legacy98_even_after_it_leaves_recent_history(self):
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root); apk=root/'new.apk'; apk.write_bytes(b'new')
+            new=dict(payload(),versionCode=102,versionName='1.0.102',revision=102)
+            current=dict(new,versionCode=101,versionName='1.0.101',revision=101,sha256='b'*64)
+            older=dict(new,versionCode=100,versionName='1.0.100',revision=100,sha256='c'*64)
+            pin=dict(new,versionCode=98,versionName='1.0.98',revision=98,sha256='d'*64)
+            def fetch(url,target,budget,expected=None,**kwargs):
+                if url.endswith('/history.json'): Path(target).write_text(json.dumps(dict(releases=[older])))
+                elif url.endswith('/test.json'): Path(target).write_text(json.dumps(current))
+                else: Path(target).write_bytes(b'old')
+                return True
+            with patch.object(d,'migration_pin',return_value=(pin,pin)), patch.object(d,'cf_project_exists',return_value=True), patch.object(d,'verify_manifest',side_effect=lambda e,c:e), patch.object(d,'fetch',side_effect=fetch):
+                previous=d.prepare_static(apk,new,'test',root/'site',d.Budget())
+            self.assertEqual([p['versionCode'] for _,p in previous],[101,98])
+            self.assertTrue((root/'site/releases/1.0.98'/('d'*64)/'app-release.apk').exists())
+            self.assertFalse((root/'site/releases/1.0.100').exists())
+            self.assertEqual(json.loads((root/'site/test.json').read_text())['versionCode'],101)
+
+    def test_missing_legacy_apk_aborts_staging_instead_of_deleting_its_public_url(self):
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root); apk=root/'new.apk'; apk.write_bytes(b'new')
+            new=dict(payload(),versionCode=100,versionName='1.0.100')
+            pin=dict(payload(),sha256='d'*64)
+            with patch.object(d,'migration_pin',return_value=(pin,pin)), patch.object(d,'cf_project_exists',return_value=False), patch.object(d,'fetch',side_effect=d.DeliveryError('missing legacy APK')):
+                with self.assertRaisesRegex(d.DeliveryError,'missing legacy APK'):
+                    d.prepare_static(apk,new,'test',root/'site',d.Budget())
     def test_retention_downloads_only_previous_two_stable_versions(self):
         with tempfile.TemporaryDirectory() as root:
             root=Path(root); apk=root/'new.apk'; apk.write_bytes(b'new')

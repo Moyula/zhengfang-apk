@@ -360,6 +360,17 @@ def cf_project_exists(channel, budget):
         raise DeliveryError('Cannot establish Cloudflare project state (HTTP '+code+'; codes '+codes+')')
 
 
+def migration_pin(channel):
+    """Public signed receipt for the old-client migration APK; never a latest manifest."""
+    if channel != 'test':
+        return None
+    envelope = strict_json((ROOT/'distribution/legacy-migration-test.json').read_bytes())
+    p = verify_manifest(envelope, 'test')
+    if p['versionCode'] != 98 or p['sha256'] != '501d8f8d0b6a8a738c4dc20f9e0cb05633e5d31c64ef8299138d39771e377c36':
+        raise DeliveryError('Unexpected legacy migration pin')
+    return envelope, p
+
+
 def prepare_static(apk, receipt, channel, directory, budget):
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     if Path(apk).stat().st_size > STATIC_LIMIT:
@@ -391,6 +402,11 @@ def prepare_static(apk, receipt, channel, directory, budget):
     if exists and channel == 'stable':
         fetch(host+'/announcement.json', directory/'announcement.json', budget, allow_missing=True, maximum=20)
     previous = sorted(previous, key=lambda e: e[1]['revision'], reverse=True)[:1 if channel == 'test' else 2]
+    # Gitee version.json still advertises test98. Retention of newer tests must
+    # never delete that immutable migration URL or advance the legacy prompt.
+    pin = migration_pin(channel)
+    if pin and pin[1]['sha256'] != receipt['sha256'] and not any(p['sha256'] == pin[1]['sha256'] for _, p in previous):
+        previous.append(pin)
     for envelope, p in previous:
         mirror = cf_mirror(p, channel); target = directory/urlsplit(mirror['url']).path.lstrip('/')
         target.parent.mkdir(parents=True, exist_ok=True)
