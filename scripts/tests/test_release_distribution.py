@@ -178,6 +178,17 @@ class DeliveryTests(unittest.TestCase):
             self.assertEqual([p['versionCode'] for _,p in previous],[97,96])
             self.assertFalse((root/'site/releases/1.0.95').exists())
 
+    def test_android_build_tools_36_certificate_format(self):
+        self.assertEqual(d.apk_signer_digests('Signer #1 certificate SHA-256 digest: '+'a'*64),{'a'*64})
+    def test_android_build_tools_37_certificate_format(self):
+        self.assertEqual(d.apk_signer_digests('V2 Signer: certificate SHA-256 digest: '+'a'*64),{'a'*64})
+    def test_repeated_verified_schemes_are_one_identity(self):
+        self.assertEqual(d.apk_signer_digests('V2 Signer: certificate SHA-256 digest: '+'a'*64+'\nV3 Signer: certificate SHA-256 digest: '+'a'*64),{'a'*64})
+    def test_additional_signers_are_not_ignored(self):
+        self.assertEqual(d.apk_signer_digests('Signer #1 certificate SHA-256 digest: '+'a'*64+'\nSigner #2 certificate SHA-256 digest: '+'b'*64),{'a'*64,'b'*64})
+    def test_source_stamp_is_not_an_apk_signer(self):
+        self.assertEqual(d.apk_signer_digests('Source Stamp Signer certificate SHA-256 digest: '+'a'*64),set())
+
 
 class PromotionTests(unittest.TestCase):
     def setUp(self):

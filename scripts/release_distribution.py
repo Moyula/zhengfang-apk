@@ -204,11 +204,18 @@ def android_tool(name):
     return found
 
 
+def apk_signer_digests(output):
+    # Build Tools <=36: "Signer #1"; 37: "V2 Signer:". A certificate may
+    # be repeated for multiple verified schemes, but every signer must be official.
+    pattern = r'^(?:Signer #\d+|V[1-4](?:\.\d+)? Signer(?: #\d+)?):? certificate SHA-256 digest: ([a-fA-F0-9]{64})$'
+    return {match.lower() for line in output.splitlines() for match in re.findall(pattern, line.strip())}
+
+
 def inspect_apk(apk, budget):
     certs = budget.run([android_tool('apksigner'), 'verify', '--print-certs', str(apk)], 'verify-apk-signature', 30).decode()
-    actual = re.findall(r'Signer #\d+ certificate SHA-256 digest: ([a-f0-9]+)', certs)
+    actual = apk_signer_digests(certs)
     official = (ROOT/'distribution/official-apk-signer.sha256').read_text().strip()
-    if actual != [official]:
+    if actual != {official}:
         raise DeliveryError('APK signer does not match official certificate')
     badging = budget.run([android_tool('aapt'), 'dump', 'badging', str(apk)], 'inspect-apk', 30).decode()
     package = re.search(r"package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", badging)
