@@ -56,6 +56,7 @@ class NavigationMotionState(initial: Int, private val scope: CoroutineScope) {
     var pages by mutableStateOf(mapOf(initial to PageMotion()))
         private set
     val position: Float get() = startPosition + (endPosition - startPosition) * progress.value
+    val transitionFinished: Boolean get() = progress.value >= 1f && entrance.value >= 1f && !progress.isRunning && !entrance.isRunning
     fun weight(page: Int): Float = (1f - abs(position - page)).coerceIn(0f, 1f)
     fun moduleProgress(page: Int): Float {
         val start = entranceStarts[page] ?: 0f

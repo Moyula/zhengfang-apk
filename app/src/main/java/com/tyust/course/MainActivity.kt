@@ -607,6 +607,22 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
                             ) { page ->
                               val route = routes.getOrElse(page) { PluginPages.registry.fallback() }
                               savedPages.SaveableStateProvider(route) {
+                                com.tyust.course.ui.system.InitialPageLoad(
+                                    key = "$route:${session.token}:$pageRevision",
+                                    title = registeredPages.firstOrNull { it.id == route }?.title.orEmpty(),
+                                    active = selectedPage == route,
+                                    transitionFinished = navigationMotion.transitionFinished,
+                                    prepare = {
+                                        if (!isDemoMode && route in setOf("app.courses", "app.grab", "app.grades", "app.schedule")) UserManager.getInstance().currentSchool?.let { school ->
+                                            // Resolve and hash immutable generic protocol material off the UI thread.
+                                            com.tyust.course.academic.plugin.AcademicProviderRegistry.operationProvider(school, when (route) {
+                                                "app.grades" -> "study.grades"
+                                                "app.schedule" -> "study.schedule"
+                                                else -> "selection.courses"
+                                            })
+                                        }
+                                    }
+                                ) {
                                 com.tyust.course.academic.plugin.ServiceExtensionHost(when (route) { "app.courses" -> "home"; "app.schedule" -> "schedule"; "app.grades" -> "grades"; else -> null }) {
                                 when (route) {
                                     "app.courses" -> com.tyust.course.ui.route.CourseListRoute()
@@ -619,6 +635,7 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
                                     )
                                     "app.services" -> com.tyust.course.academic.plugin.ExtensionCenterContent(onOpen = { openPage(it) })
                                     else -> com.tyust.course.academic.plugin.PluginPageContent(route, onNavigate = { next, params -> pageParameters = pageParameters + (next to params.toString()); openPage(next) }, onBack = { backPage() }, params = org.json.JSONObject(pageParameters[route] ?: "{}"))
+                                }
                                 }
                                 }
                               }

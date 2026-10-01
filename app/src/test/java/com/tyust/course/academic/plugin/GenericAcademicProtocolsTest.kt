@@ -44,11 +44,48 @@ class GenericAcademicProtocolsTest {
     }
     @Test fun disablingGenericProtocolCannotReactivateLegacyKotlinFallback() {
         val school = school("legacy_zf")
+        // Populate the material cache before revoking the provider.
+        assertNotNull(AcademicProviderRegistry.operationProvider(school, "study.schedule"))
         AcademicProviderRegistry.setEnabled("org.zf.protocol.zf", false)
         try {
             assertTrue(AcademicGatewayFactory.supports(school))
             assertFalse(AcademicProviderRegistry.hasCapability(school, "study.schedule"))
             try { AcademicGatewayFactory.create(school, "account"); fail() } catch (e: AcademicException) { assertEquals(AcademicStatus.UNSUPPORTED, e.status) }
         } finally { AcademicProviderRegistry.setEnabled("org.zf.protocol.zf", true) }
+    }
+    @Test fun repeatedBindingReusesScriptButNeverSharesMutableManifest() {
+        val base = AcademicProviderRegistry.knownPackage("org.zf.protocol.zf")!!
+        val school = school("zf")
+        val first = GenericAcademicProtocols.bind(base, school)
+        val originalDigest = first.digest
+        first.manifest.json.put("id", "synthetic.mutation")
+        first.manifest.school.put("domain", "other.example.test")
+        val next = GenericAcademicProtocols.bind(base, SchoolConfig.fromJson(school.toJson()))
+        assertSame(first.source, next.source)
+        assertEquals(originalDigest, next.digest)
+        assertEquals(base.manifest.id, next.manifest.id)
+        assertEquals(school.domain, next.manifest.school.getString("domain"))
+    }
+    @Test fun changedSchoolScopeOrPackageNeverReusesOldExecutionMaterial() {
+        val base = AcademicProviderRegistry.knownPackage("org.zf.protocol.zf")!!
+        val school = school("zf")
+        val first = GenericAcademicProtocols.bind(base, school)
+        school.domain = "second.example.test"
+        val second = GenericAcademicProtocols.bind(base, school)
+        assertNotEquals(first.digest, second.digest)
+        assertEquals("school.example.test", first.manifest.school.getString("domain"))
+        assertTrue(second.source.contains("second.example.test"))
+        val updated = GenericAcademicProtocols.bind(base.copy(source = base.source + "\n// update", digest = "new-synthetic-package"), school)
+        assertNotEquals(second.digest, updated.digest)
+        assertTrue(updated.source.endsWith("// update"))
+    }
+    @Test fun bindingCacheNeverConfusesPublisherTrust() {
+        val base = AcademicProviderRegistry.knownPackage("org.zf.protocol.zf")!!
+        val first = GenericAcademicProtocols.bind(base, school("zf"))
+        val next = GenericAcademicProtocols.bind(base.copy(official = true, bundled = false, publisher = "synthetic-publisher"), school("zf"))
+        assertEquals(first.digest, next.digest)
+        assertTrue(next.official)
+        assertFalse(next.bundled)
+        assertEquals("synthetic-publisher", next.publisher)
     }
 }

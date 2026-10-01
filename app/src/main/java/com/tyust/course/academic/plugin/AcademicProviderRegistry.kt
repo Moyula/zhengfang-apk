@@ -127,7 +127,7 @@ object AcademicProviderRegistry {
     fun manualChoice(school: SchoolConfig): String = schoolPrefs()?.getString("provider:${schoolKey(school)}", null) ?: school.academicProvider.orEmpty()
     fun candidates(school: SchoolConfig): List<PluginPackage> = installed.values.filter { it.manifest.isAcademic && it.official && isEnabled(it.manifest.id, school) && matches(it, school) }.sortedBy { it.manifest.id }
     fun contributions(school: SchoolConfig, kind: String): List<Pair<PluginPackage, JSONObject>> = services(school).filter { it.manifest.isNative }.flatMap { pkg -> pkg.manifest.contributes.optJSONArray(kind)?.let(PluginJson::objects).orEmpty().map { pkg to it } }
-    fun isEnabled(id: String): Boolean = (store?.activeDigest(id) != null || id in bundled) && schoolPrefs()?.getBoolean("disabled:global:$id", false) != true
+    fun isEnabled(id: String): Boolean = (id in bundled || store?.activeDigest(id) != null) && schoolPrefs()?.getBoolean("disabled:global:$id", false) != true
     fun setEnabled(id: String, enabled: Boolean) {
         if (!enabled) { PluginOperation.cancelPlugin(id); PluginAcademicSession.cancelProvider(id); PluginHttpClients.clearPlugin(id) }
         if (!enabled) app?.let { PluginAcademicSession.revoke(it, id); PluginDataGuard.revoke(it, id) }
