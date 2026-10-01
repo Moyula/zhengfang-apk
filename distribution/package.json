@@ -2,5 +2,10 @@
   "name": "academic-app-static-delivery",
   "private": true,
   "version": "1.0.0",
-  "devDependencies": { "wrangler": "4.135.0" }
+  "devDependencies": {
+    "wrangler": "4.135.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }

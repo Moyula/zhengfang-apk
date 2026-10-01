@@ -12,7 +12,7 @@ def verify_run(run, receipt):
         raise DeliveryError('A successful completed manual test run is required')
     if run.get('repository', {}).get('full_name') != REPO or run.get('head_repository', {}).get('full_name') != REPO:
         raise DeliveryError('Build must come from this repository')
-    if run.get('path') != '.github/workflows/release.yml' or run.get('head_sha') != receipt.get('sourceSha') or str(run.get('id')) != receipt.get('buildId'):
+    if run.get('path') != '.github/workflows/release.yml' or run.get('head_sha') != receipt.get('deliverySourceSha', receipt.get('sourceSha')) or str(run.get('id')) != receipt.get('deliveryRunId', receipt.get('buildId')):
         raise DeliveryError('Build receipt does not match the trusted workflow run')
     tests = receipt.get('tests', {})
     if not tests.get('tests') or tests.get('failures') or tests.get('errors'):
@@ -30,9 +30,15 @@ def download_test_run(run_id, directory, budget):
     actual = inspect_apk(directory/'app-release.apk', budget)
     if any(actual[key] != receipt.get(key) for key in actual):
         raise DeliveryError('Test artifact does not match receipt')
+    from reuse_test_artifact import validate_origin, APK_INPUTS
+    if receipt.get('deliveryRunId'):
+        origin = gh_api(f'repos/{REPO}/actions/runs/{receipt['buildId']}', budget)
+        validate_origin(origin, gh_api(f'repos/{REPO}/actions/runs/{receipt['buildId']}/jobs?per_page=100', budget)['jobs'])
+        if origin['head_sha'] != receipt['sourceSha']:
+            raise DeliveryError('Reused build source mismatch')
     comparison = gh_api(f'repos/{REPO}/compare/{receipt["sourceSha"]}...main', budget)
-    if comparison.get('status') not in ('identical', 'ahead') or comparison.get('files'):
-        raise DeliveryError('Main must contain the tested source with no subsequent file changes; otherwise retest')
+    if comparison.get('status') not in ('identical', 'ahead') or any(f['filename']==p or f['filename'].startswith(p+'/') for f in comparison.get('files', []) for p in APK_INPUTS):
+        raise DeliveryError('Main must contain unchanged tested APK inputs; delivery-only repairs may advance independently')
     return receipt
 
 

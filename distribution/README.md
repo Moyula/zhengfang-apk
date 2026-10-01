@@ -6,12 +6,14 @@ Test build 1.0.98; API 3 / SDK 3.2.7 unchanged. Test acceptance is required befo
 
 GitHub Actions secrets: existing APK signing secrets (build job only), `APP_UPDATE_SIGNING_KEY` (independent P-256 PEM; metadata job only), `CLOUDFLARE_API_TOKEN` (mirror job only), `GITEE_TOKEN` (explicit Gitee job only). Public variable: `CLOUDFLARE_ACCOUNT_ID`. Never put credentials in this directory or artifacts. The manifest public key and official APK signer fingerprint are public and tracked.
 
+The pinned deployment CLI requires Node.js 22 or newer; all mirror workflows use Node 22.
+
 Cloudflare token: account Workers Scripts Edit and Account Settings Read, zone Workers Routes Edit and Zone Read, scoped to the deployment account and `hidisiwa.xyz`. Custom domain creation may require DNS Edit if the account configuration does not allow Workers custom-domain provisioning; diagnose an actual permission failure before expanding scope. Do not use a Global API Key. The CLI uses a custom domain route and assets only. Test and stable Workers are separate projects.
 
 ## Workflows
 
-- `release.yml`: manual signed test build; no tag or official Release. Test mirror runs three deployment/full-download verification rounds, then publishes `test.json` to the test host and the `updates` branch. Artifact retention seven days, APK compression disabled. Retry the failed mirror job only if build succeeded.
-- `promote-release.yml`: after user acceptance and unchanged tested files are in main, promote by successful test run ID. Download the original artifact, verify receipt/signature/digest/checks, create immutable official tag and Release. No Gradle/signing. Stable mirrors and Gitee small metadata are separate jobs. Attachment upload is off.
+- `release.yml`: manual signed test build; `reuse_run_id` reuses a successful original build after checking unchanged APK inputs, and `sync_test_gitee` explicitly publishes an isolated Gitee test attachment; no tag or official Release. Test mirror runs three deployment/full-download verification rounds, then publishes `test.json` to the test host and the `updates` branch. Artifact retention seven days, APK compression disabled. Retry the failed mirror job only if build succeeded.
+- `promote-release.yml`: after user acceptance and unchanged tested APK inputs are in main, promote by successful test run ID. Download the original artifact, verify receipt/signature/digest/checks, create immutable official tag and Release. No Gradle/signing. Stable mirrors and Gitee small metadata are separate jobs. Attachment upload is off.
 - `repair-delivery.yml`: choose `mirrors` or `metadata` and an existing formal tag. No APK build or signing. Older metadata repairs cannot replace a newer version. Metadata repair does not upload an APK.
 - `sync-gitee-source.yml`: separately fast-forward main source to Gitee `github-source`, preserving the independent metadata commits on Gitee main. Never force-push or move tags.
 - `sync-gitee.yml`: optional Gitee APK attachment only, total three-minute script budget. No version JSON, announcements or source writes.

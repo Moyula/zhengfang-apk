@@ -28,7 +28,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: inputs.target == 'mirrors'
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
           cache-dependency-path: distribution/package-lock.json
       - if: inputs.target == 'mirrors'
