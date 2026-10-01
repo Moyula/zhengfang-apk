@@ -194,8 +194,7 @@ class UpdateManager internal constructor(private val context: Context,
             restore.join(); if (mutable.value.active) return@withLock
             downloadJob?.cancelAndJoin()
             val manifest = mutable.value.manifest ?: return@withLock
-            if (manifest.minSdk > Build.VERSION.SDK_INT || context.packageName != manifest.packageName) return@withLock
-            if (manifest.versionCode < getCurrentVersionCode() || (manifest.versionCode == getCurrentVersionCode() && !(testCurrent && channel == "test"))) return@withLock
+            if (context.packageName != manifest.packageName || !manifest.isInstallCandidate(getCurrentVersionCode(), Build.VERSION.SDK_INT, testCurrent && channel == "test")) return@withLock
             if (task?.identity != manifest.identity) { partial.delete(); completed.delete(); taskEtag = null; taskMirror = null }
             task = manifest; requestedMirror = mirrorId
             mutable.update { it.copy(phase = Phase.PREPARING, bytes = partial.length(), message = "正在准备下载", errorCode = "", showDialog = true) }
@@ -309,7 +308,9 @@ class UpdateManager internal constructor(private val context: Context,
         } }
     }
     fun openBrowser(mirror: UpdateMirror) {
-        if (state.value.manifest?.mirrors?.contains(mirror) != true) return
+        val snapshot = state.value
+        val manifest = snapshot.manifest ?: return
+        if (mirror !in manifest.mirrors || !manifest.isInstallCandidate(getCurrentVersionCode(), Build.VERSION.SDK_INT, snapshot.testChannel)) return
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(mirror.url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
     private fun persistTask() {

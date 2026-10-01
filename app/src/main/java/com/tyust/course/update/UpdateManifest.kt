@@ -25,6 +25,8 @@ data class UpdateManifest(
     val buildId: String, val publishedAt: String, val envelope: String
 ) {
     val identity get() = "$channel:$versionCode:$sha256:$size"
+    fun isInstallCandidate(currentCode: Int, sdk: Int, testCurrent: Boolean = false): Boolean =
+        minSdk <= sdk && (versionCode > currentCode || (testCurrent && channel == "test" && versionCode == currentCode))
 }
 
 /** One parser for Android and JVM: reject duplicate keys and JSON extensions. */

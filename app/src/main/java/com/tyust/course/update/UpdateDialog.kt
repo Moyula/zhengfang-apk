@@ -1,5 +1,6 @@
 package com.tyust.course.update
 
+import android.os.Build
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -19,14 +20,14 @@ fun UpdateDialog(manager: UpdateManager = UpdateManager.getInstance(LocalContext
     val active = state.active
     var showMirrors by remember { mutableStateOf(false) }
     val current = manager.getCurrentVersionCode()
-    val canDownload = info != null && (info.versionCode > current || (state.testChannel && info.versionCode == current))
+    val canDownload = info?.isInstallCandidate(current, Build.VERSION.SDK_INT, state.testChannel) == true
     SystemDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (state.testChannel) "测试更新" else "应用更新") },
         confirmButton = {
             when {
                 active -> SystemPrimaryButton(text = "暂停下载", onClick = { manager.pauseDownload() }, modifier = Modifier.fillMaxWidth())
-                state.phase == UpdateManager.Phase.READY -> SystemPrimaryButton(text = "安装", onClick = { manager.installReady() }, modifier = Modifier.fillMaxWidth())
+                canDownload && state.phase == UpdateManager.Phase.READY -> SystemPrimaryButton(text = "安装", onClick = { manager.installReady() }, modifier = Modifier.fillMaxWidth())
                 canDownload -> SystemPrimaryButton(text = if (state.phase == UpdateManager.Phase.PAUSED) "继续下载" else if (info!!.versionCode == current) "重新下载测试包" else "下载更新",
                     onClick = { manager.startDownload(testCurrent = state.testChannel) }, modifier = Modifier.fillMaxWidth())
                 else -> SystemPrimaryButton(text = "重新检查", onClick = { manager.checkForUpdate(manual = true) }, modifier = Modifier.fillMaxWidth(), enabled = state.check != UpdateManager.Check.CHECKING)
@@ -35,20 +36,25 @@ fun UpdateDialog(manager: UpdateManager = UpdateManager.getInstance(LocalContext
         dismissButton = { SystemSecondaryButton(text = if (active) "后台继续" else "稍后", onClick = onDismiss, modifier = Modifier.fillMaxWidth()) }
     ) {
         Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (info != null) {
-                Text("v${manager.getCurrentVersionName()} → v${info.versionName}", style = MaterialTheme.typography.titleMedium)
+            Text(state.message.ifBlank { "检查版本与下载进度" }, color = if (state.errorCode.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            if (state.check == UpdateManager.Check.CACHED) Text("当前为缓存信息，无法确认是否已有更新版本。", style = MaterialTheme.typography.bodySmall)
+            val versionLabel = when {
+                canDownload && info!!.versionCode > current -> "v${manager.getCurrentVersionName()} → v${info.versionName}"
+                canDownload -> "当前测试版本 v${manager.getCurrentVersionName()}"
+                else -> "当前版本 v${manager.getCurrentVersionName()}"
+            }
+            Text(versionLabel, style = MaterialTheme.typography.titleMedium)
+            if (canDownload && info != null) {
                 if (info.forceUpdate) Text("此版本包含重要更新，请尽快安装", color = MaterialTheme.colorScheme.error)
                 if (info.releaseNotes.isNotBlank()) Text(info.releaseNotes, style = MaterialTheme.typography.bodyMedium)
             }
-            Text(state.message.ifBlank { "检查版本与下载进度" }, color = if (state.errorCode.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-            if (state.check == UpdateManager.Check.CACHED) Text("当前为缓存信息，无法确认是否已有更新版本。", style = MaterialTheme.typography.bodySmall)
-            state.mirror?.let { Text("下载线路：${it.name}", style = MaterialTheme.typography.bodySmall) }
-            if (active || state.phase in setOf(UpdateManager.Phase.PAUSED, UpdateManager.Phase.READY)) {
+            if (canDownload) state.mirror?.let { Text("下载线路：${it.name}", style = MaterialTheme.typography.bodySmall) }
+            if (canDownload && (active || state.phase in setOf(UpdateManager.Phase.PAUSED, UpdateManager.Phase.READY))) {
                 LinearProgressIndicator(progress = { state.progress / 100f }, modifier = Modifier.fillMaxWidth())
                 Text("${state.progress}% · ${"%.1f".format(state.bytes / 1048576.0)} / ${"%.1f".format((info?.size ?: 0) / 1048576.0)} MiB", style = MaterialTheme.typography.bodySmall)
             }
             if (active || state.phase == UpdateManager.Phase.PAUSED) TextButton(onClick = { manager.pauseDownload(cancel = true) }) { Text("取消下载") }
-            if (info != null) {
+            if (canDownload && info != null) {
                 TextButton(onClick = { showMirrors = !showMirrors }) { Text(if (showMirrors) "收起下载线路" else "下载线路与浏览器下载") }
                 if (showMirrors) info.mirrors.forEach { mirror ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
