@@ -1,5 +1,5 @@
 name: Isolated plugin audit
-run-name: Plugin audit · ${{ inputs.self_test == 'true' && 'toolchain self-test' || inputs.draft_id }}
+run-name: Plugin audit · ${{ inputs.self_test && 'toolchain self-test' || inputs.draft_id }}
 on:
   workflow_dispatch:
     inputs:
@@ -40,7 +40,7 @@ jobs:
           AUDIT_SELF_TEST: ${{ inputs.self_test }}
         run: python3 scripts/plugin_audit_job.py
       - name: Record startup failure without exposing submitted source
-        if: failure() && inputs.self_test != 'true'
+        if: failure() && !inputs.self_test
         env:
           AUDIT_QUEUE_TOKEN: ${{ secrets.AUDIT_QUEUE_TOKEN }}
           AUDIT_DRAFT_ID: ${{ inputs.draft_id }}
