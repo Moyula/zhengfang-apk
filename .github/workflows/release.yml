@@ -11,6 +11,10 @@ on:
         description: '仅补传：复用此运行的成功构建，留空才构建 APK'
         required: false
         default: ''
+      legacy_test_bridge:
+        description: '明确向旧客户端推送此次迁移测试包，仅更新兼容 version.json'
+        type: boolean
+        default: false
       sync_test_gitee:
         description: '同时将同一测试 APK 发布为 Gitee 测试附件，不改正式提示'
         type: boolean
@@ -219,3 +223,37 @@ jobs:
         env:
           RESULT: ${{ job.status }}
         run: echo "Gitee test attachment · $RESULT. Stable version.json, announcements and source main unchanged." >> "$GITHUB_STEP_SUMMARY"
+
+  legacy-test-bridge:
+    if: inputs.legacy_test_bridge && !inputs.preflight_only
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: app-updates-stable
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-apk
+          path: delivery
+      - name: Publish explicitly requested legacy migration update
+        timeout-minutes: 3
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: python3 scripts/bridge_legacy_test.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: legacy-test-bridge-report
+          path: delivery/legacy-test-bridge.json
+          retention-days: 7
+      - if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: echo "Legacy test update prompt · $RESULT. Ordinary optional update; formal tag, GitHub Release and stable signed channel unchanged." >> "$GITHUB_STEP_SUMMARY"
