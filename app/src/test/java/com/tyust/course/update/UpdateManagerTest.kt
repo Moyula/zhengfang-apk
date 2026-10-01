@@ -41,6 +41,21 @@ class UpdateManagerTest {
         val m = create(server); m.checkForUpdate(true); val result = awaitCheck(m)
         assertEquals(UpdateManager.Check.AVAILABLE, result.check); assertTrue(result.showDialog)
     } }
+    @Test fun migratedClientCanCheckOlderStableReleaseWithoutDowngrade() { MockWebServer().use { server ->
+        val m = create(server)
+        assertFalse(m.state.value.testChannel)
+        val stable = UpdateFixtures.payload().put("versionCode", m.getCurrentVersionCode() - 1).put("versionName", "1.0.97")
+        server.enqueue(MockResponse().setBody(UpdateFixtures.envelope(stable.toString())))
+        m.checkForUpdate(true)
+        assertEquals(UpdateManager.Check.UP_TO_DATE, awaitCheck(m).check)
+        assertEquals(UpdateManager.Phase.IDLE, m.state.value.phase)
+    } }
+    @Test fun defaultChannelRejectsTestManifestInsteadOfSilentlyOptingIn() { MockWebServer().use { server ->
+        server.enqueue(MockResponse().setBody(UpdateFixtures.envelope(UpdateFixtures.payload().put("channel", "test").toString())))
+        val m = create(server); m.checkForUpdate(true)
+        assertEquals(UpdateManager.Check.FAILED, awaitCheck(m).check)
+        assertFalse(m.state.value.testChannel)
+    } }
     @Test fun concurrentChecksShareOneRequest() { MockWebServer().use { server ->
         server.enqueue(MockResponse().setBodyDelay(100, TimeUnit.MILLISECONDS).setBody(UpdateFixtures.envelope()))
         val m = create(server); repeat(20) { m.checkForUpdate(true) }; awaitCheck(m)
