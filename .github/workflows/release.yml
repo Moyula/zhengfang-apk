@@ -7,6 +7,10 @@ on:
         description: '测试版本号；不创建正式 tag 或 Release'
         required: true
         default: 'v1.0.98'
+      preflight_only:
+        description: '只核对既有官方包与部署凭据，不构建、不发布'
+        type: boolean
+        default: false
       deploy_test_mirror:
         description: '同步免费测试镜像并做三轮上传及完整下载校验'
         type: boolean
@@ -15,7 +19,23 @@ on:
 permissions:
   contents: read
 jobs:
+  preflight:
+    if: inputs.preflight_only
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+      - name: Check official APK verification output and CF read access
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python3 scripts/distribution_preflight.py
   build:
+    if: ${{ !inputs.preflight_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -65,6 +85,15 @@ jobs:
           compression-level: 0
           retention-days: 7
           if-no-files-found: error
+      - name: Preserve failed receipt diagnostics for repair
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-build-diagnostics
+          path: delivery/
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Upload check reports
         if: always()
         uses: actions/upload-artifact@v4
