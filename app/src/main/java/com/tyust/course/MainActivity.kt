@@ -678,15 +678,8 @@ fun MainScreen(fragmentActivity: FragmentActivity) {
                 onOpen = { id -> initialSurveyId = id; showSurveyCenter = true }
             )
 
-            if (!session.expired && updateState.showDialog() && updateInfo != null) {
-                UpdateDialog(
-                    updateInfo = updateInfo,
-                    currentVersion = updateState.getCurrentVersion(),
-                    onDismiss = { updateState.dismiss() },
-                    onUpdate = { updateState.startDownload() },
-                    downloadProgress = updateState.downloadProgress(),
-                    isDownloading = updateState.isDownloading()
-                )
+            if (!session.expired && updateState.showDialog()) {
+                UpdateDialog(onDismiss = { updateState.dismiss() })
             }
 
             if (sessionNotice.token == session.token && sessionNotice.visible && isTokenExpired) {

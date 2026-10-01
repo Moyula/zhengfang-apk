@@ -33,6 +33,8 @@ class PluginDeveloperActivity : ComponentActivity() {
         setContent { CourseSelectorTheme { GlassWindowHost { Center() } } }
     }
     @Composable private fun Center() {
+        val updateManager = remember { com.tyust.course.update.UpdateManager.getInstance(this) }
+        val updateState by updateManager.state.collectAsState()
         val scope = rememberCoroutineScope()
         var packages by remember { mutableStateOf<List<PluginPackage>>(emptyList()) }
         var selected by remember { mutableStateOf<PluginPackage?>(null) }
@@ -216,6 +218,13 @@ class PluginDeveloperActivity : ComponentActivity() {
                         InsetGroupedRow(title = if (AcademicProviderRegistry.installedOverride(pkg)) "卸载此插件" else "停用内置插件",
                             icon = Icons.Outlined.Close, enabled = !busy, showDivider = false, onClick = { uninstall = pkg })
                     }
+                }
+                InsetGroupedSection(header = "App 测试更新", footer = "测试通道仅用于手动验收，不改变正式更新提示。下载中请先暂停再切换通道。") {
+                    InsetGroupedRow(title = "启用测试通道", subtitle = "独立测试镜像与签名清单", icon = Icons.Outlined.SystemUpdate,
+                        onClick = { if (!updateState.active) updateManager.setTestChannel(!updateState.testChannel) },
+                        trailing = { LiquidSwitch(checked = updateState.testChannel, onCheckedChange = { updateManager.setTestChannel(it) }, enabled = !updateState.active) })
+                    InsetGroupedRow(title = "检查更新与下载进度", subtitle = "可重新下载当前测试包验证线路", icon = Icons.Outlined.Download,
+                        onClick = { updateManager.checkForUpdate(manual = true); startActivity(android.content.Intent(this@PluginDeveloperActivity, com.tyust.course.update.UpdateDownloadActivity::class.java)) })
                 }
                 InsetGroupedSection(header = "开发者工具", footer = if (developer) "开发模式允许导入未签名的本地包，请仅使用可信来源。" else null) {
                     InsetGroupedRow(title = "开发者模式", subtitle = "本地包导入与独立会话调试", icon = Icons.Outlined.Code,

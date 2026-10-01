@@ -141,11 +141,8 @@ fun SettingsRoute(
     
     // Update States
     val updateManager = remember { UpdateManager.getInstance(context) }
-    var updateInfo by remember { mutableStateOf<UpdateManager.UpdateInfo?>(null) }
-    var showUpdateDialog by remember { mutableStateOf(false) }
-    var isDownloading by remember { mutableStateOf(false) }
-    var downloadProgress by remember { mutableIntStateOf(0) }
-    var isCheckingUpdate by remember { mutableStateOf(false) }
+    val updateSnapshot by updateManager.state.collectAsState()
+    val isCheckingUpdate = updateSnapshot.check == UpdateManager.Check.CHECKING
     val currentVersion = remember { updateManager.getCurrentVersionName() }
 
 
@@ -248,45 +245,8 @@ fun SettingsRoute(
     }
     
     fun checkForUpdate() {
-        if (isDemoMode) {
-            GlassToaster.show("本地演示模式不执行更新检查")
-            return
-        }
-        isCheckingUpdate = true
-        GlassToaster.show("正在检查更新…")
-        
-        updateManager.checkForUpdate { info ->
-            isCheckingUpdate = false
-            if (info != null) {
-                updateInfo = info
-                showUpdateDialog = true
-            } else {
-                GlassToaster.show("已是最新版本")
-            }
-        }
-    }
-    
-    fun startDownload() {
-        if (isDemoMode) return
-        val info = updateInfo ?: return
-        isDownloading = true
-        downloadProgress = 0
-        
-        updateManager.downloadApk(
-            downloadUrl = info.downloadUrl,
-            onProgress = { progress ->
-                downloadProgress = progress
-            },
-            onComplete = { file ->
-                isDownloading = false
-                if (file != null && file.exists()) {
-                    updateManager.installApk(file)
-                    showUpdateDialog = false
-                } else {
-                    GlassToaster.show("下载失败，请重试")
-                }
-            }
-        )
+        if (isDemoMode) { GlassToaster.show("本地演示模式不执行更新检查"); return }
+        updateManager.checkForUpdate(manual = true)
     }
 
     fun refreshCookieManually() {
@@ -327,21 +287,6 @@ fun SettingsRoute(
         }
     }
 
-    // Update Dialog
-    if (showUpdateDialog && updateInfo != null && !session.expired) {
-        UpdateDialog(
-            updateInfo = updateInfo!!,
-            currentVersion = currentVersion,
-            onDismiss = { 
-                showUpdateDialog = false 
-                updateInfo = null
-            },
-            onUpdate = { startDownload() },
-            downloadProgress = downloadProgress,
-            isDownloading = isDownloading
-        )
-    }
-    
     val usagePreferences by com.tyust.course.usage.UsageStatsManager.preferences.collectAsState()
     SettingsScreen(
         studentName = studentName,

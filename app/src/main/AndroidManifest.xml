@@ -85,6 +85,8 @@
         <activity android:name=".academic.plugin.PluginDeveloperActivity" android:exported="false" android:configChanges="uiMode" />
         <activity android:name=".academic.plugin.CampusServiceCenterActivity" android:exported="false" android:configChanges="uiMode" />
         <activity android:name=".academic.plugin.ServicePluginActivity" android:exported="false" android:configChanges="uiMode" />
+        <service android:name=".update.UpdateDownloadService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <activity android:name=".update.UpdateDownloadActivity" android:exported="false" />
         <!-- Background grab service -->
         <!-- #30/#50: keep a private separate process; isolated UID startup fails on some OEMs.
              QuickJS/host checks remain, but this no longer provides OS-level UID isolation. -->
