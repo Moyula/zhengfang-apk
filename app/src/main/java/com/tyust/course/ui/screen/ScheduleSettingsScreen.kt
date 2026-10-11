@@ -11,13 +11,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.outlined.AccessTime
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -107,7 +110,9 @@ fun ScheduleSettingsScreen(
     reminderSummary: com.tyust.course.schedule.SemesterReminderSummary? = null,
     canChangeReminders: Boolean = false,
     onSemesterReminders: (Boolean) -> Unit = {},
-    defaultLead: Int = 15, onDefaultLead: ((Int) -> Unit)? = null, onAdjustments: (() -> Unit)? = null
+    defaultLead: Int = 15, onDefaultLead: ((Int) -> Unit)? = null, onAdjustments: (() -> Unit)? = null,
+    studyBlocks: List<com.tyust.course.schedule.ScheduleStudyBlock> = emptyList(),
+    onStudyBlockChange: ((com.tyust.course.schedule.ScheduleStudyBlock) -> Unit)? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var periodCount by remember { mutableStateOf(manager.periodCount) }
@@ -120,6 +125,10 @@ fun ScheduleSettingsScreen(
     if (showLeadPicker) ReminderLeadPicker(defaultLead, onDismiss = { showLeadPicker = false }, onSave = { it?.let { minutes -> onDefaultLead?.invoke(minutes) } })
     var showPeriodCountPicker by remember { mutableStateOf(false) }
     var editingPeriod by remember { mutableStateOf<PeriodTime?>(null) }
+    var editingStudy by remember { mutableStateOf<com.tyust.course.schedule.ScheduleStudyBlock?>(null) }
+    editingStudy?.let { block ->
+        ScheduleStudySheet(block, onDismiss = { editingStudy = null }, onSave = { onStudyBlockChange?.invoke(it) })
+    }
 
     val dateFormat = remember { SimpleDateFormat("yyyy年M月d日", Locale.CHINA) }
     val dateText = if (semesterStartDate > 0) dateFormat.format(Date(semesterStartDate)) else "未设置"
@@ -236,6 +245,30 @@ fun ScheduleSettingsScreen(
                                     if (displayPreferences.compact) 1 else 0,
                                     { onDisplayPreferences(displayPreferences.copy(compact = it == 1)) }, Modifier.width(104.dp))
                             })
+                        }
+                    }
+                    if (onStudyBlockChange != null) {
+                        val studyRows = com.tyust.course.schedule.ScheduleStudyKind.entries.map { kind ->
+                            studyBlocks.firstOrNull { it.kind == kind }
+                                ?: com.tyust.course.schedule.ScheduleStudyBlock.default(kind)
+                        }
+                        InsetGroupedSection(header = "自习时间") {
+                            studyRows.forEachIndexed { index, block ->
+                                InsetGroupedRow(
+                                    title = block.name,
+                                    subtitle = (if (block.enabled) "已开启 · " else "未开启 · ") + studyBlockSummary(block),
+                                    showDivider = index != studyRows.lastIndex,
+                                    trailing = {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = { editingStudy = block }
+                                )
+                            }
                         }
                     }
                     InsetGroupedSection(header = "桌面组件") {

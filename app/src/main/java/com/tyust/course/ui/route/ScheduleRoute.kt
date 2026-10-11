@@ -182,6 +182,9 @@ fun ScheduleRoute(isActive: Boolean = true) {
     val reminderScheduler = remember(context) { ScheduleReminderScheduler.get(context) }
     val customRevision = settingsManager.revision
     val customCourses = remember(customRevision, routeAccountKey) { settingsManager.getCustomCourses(routeAccountKey) }
+    // 早/晚自习与课表共用一份数据：设置页改完，课表要立刻跟着变。
+    val studyBlocks = remember(customRevision, routeAccountKey) { settingsManager.getStudyBlocks(routeAccountKey) }
+    var editingStudyKind by remember { mutableStateOf<ScheduleStudyKind?>(null) }
     val remindersRevision = reminderScheduler.revision
     val settingsTerm = settingsTermOverride ?: resolvedTermId
     val termTimeBase = remember(settingsTerm, remindersRevision, customRevision, actualTermId) {
@@ -479,6 +482,8 @@ fun ScheduleRoute(isActive: Boolean = true) {
             detailOccurrenceDate = it.occurrenceDate
         },
         onCourseLongClick = { quickCourseId = it.id },
+        studyBlocks = studyBlocks,
+        onStudyClick = { editingStudyKind = it },
         onAddClick = { editingId = java.util.UUID.randomUUID().toString() },
         onWidgetClick = { showWidgetPicker = true },
         onSettingsClick = { settingsTermOverride = null; showSettingsDialog = true },
@@ -537,6 +542,8 @@ fun ScheduleRoute(isActive: Boolean = true) {
         com.tyust.course.ui.system.GlassSubpage(onDismiss = { showSettingsDialog = false; settingsTermOverride = null }) { close ->
             ScheduleSettingsScreen(
                 manager = settingsManager,
+                studyBlocks = studyBlocks,
+                onStudyBlockChange = { settingsManager.saveStudyBlock(it, routeAccountKey) },
                 defaultLead = reminderScheduler.defaultLead(routeAccountKey),
                 onDefaultLead = { reminderScheduler.setDefaultLead(routeAccountKey, it) },
                 onAdjustments = { adjustmentCourseId = null; showAdjustments = true },
@@ -659,6 +666,13 @@ fun ScheduleRoute(isActive: Boolean = true) {
                 notificationCourseJson = null
                 focusRegistry.restore(course.id)
             })
+    }
+    // 课表里点自习那条，就地打开同一个编辑面板。
+    editingStudyKind?.let { kind ->
+        com.tyust.course.ui.screen.ScheduleStudySheet(
+            block = studyBlocks.firstOrNull { it.kind == kind } ?: ScheduleStudyBlock.default(kind),
+            onDismiss = { editingStudyKind = null },
+            onSave = { settingsManager.saveStudyBlock(it, routeAccountKey); editingStudyKind = null })
     }
     if (showAdjustments) com.tyust.course.ui.system.GlassSubpage(onDismiss = { showAdjustments = false }) { close ->
         com.tyust.course.ui.screen.ScheduleAdjustmentsScreen(courses, displayedTimeBase, periodCount,

@@ -3,6 +3,8 @@ package com.tyust.course.manager
 import android.content.Context
 import android.content.SharedPreferences
 import com.tyust.course.schedule.ScheduleDates
+import com.tyust.course.schedule.ScheduleStudyBlock
+import com.tyust.course.schedule.ScheduleStudyKind
 import com.tyust.course.schedule.ScheduleWeekStart
 import org.json.JSONArray
 import org.json.JSONObject
@@ -27,6 +29,7 @@ class ScheduleSettingsManager internal constructor(private var prefs: SharedPref
         private const val KEY_CUSTOM_COURSES = "custom_courses"
         private const val KEY_PERIOD_COUNT = "period_count"
         private const val KEY_WEEK_START = "week_start"
+        private const val KEY_STUDY_BLOCKS = "study_blocks"
         
         @Volatile
         private var instance: ScheduleSettingsManager? = null
@@ -364,6 +367,27 @@ class ScheduleSettingsManager internal constructor(private var prefs: SharedPref
         prefs?.edit()
             ?.putString(customCoursesKey(accountKey), array.toString())
             ?.remove(KEY_CUSTOM_COURSES)
+            ?.apply()
+        revision++
+    }
+
+    // ============ 早自习 / 晚自习 ============
+
+    /** 两种自习永远各返回一条（存档缺失回落默认值），按账号+学期隔离。 */
+    @JvmOverloads fun getStudyBlocks(accountKey: String = accountStorageKey()): List<ScheduleStudyBlock> =
+        ScheduleStudyBlock.decode(getScopedString(KEY_STUDY_BLOCKS, accountKey))
+
+    @JvmOverloads fun getStudyBlock(
+        kind: ScheduleStudyKind,
+        accountKey: String = accountStorageKey()
+    ): ScheduleStudyBlock = getStudyBlocks(accountKey).firstOrNull { it.kind == kind }
+        ?: ScheduleStudyBlock.default(kind)
+
+    fun saveStudyBlock(block: ScheduleStudyBlock, accountKey: String = accountStorageKey()) {
+        val blocks = getStudyBlocks(accountKey).map { if (it.kind == block.kind) block else it }
+        prefs?.edit()
+            ?.putString("${KEY_STUDY_BLOCKS}_$accountKey", ScheduleStudyBlock.encode(blocks))
+            ?.remove(KEY_STUDY_BLOCKS)
             ?.apply()
         revision++
     }

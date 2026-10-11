@@ -147,6 +147,8 @@ import kotlinx.coroutines.flow.collectLatest
 import androidx.lifecycle.repeatOnLifecycle
 import com.tyust.course.schedule.ScheduleAgenda
 import com.tyust.course.schedule.ScheduleDisplayPreferences
+import com.tyust.course.schedule.ScheduleStudyBlock
+import com.tyust.course.schedule.ScheduleStudyKind
 import com.tyust.course.schedule.ScheduleTimeBase
 import com.tyust.course.schedule.ScheduleViewPosition
 
@@ -227,7 +229,9 @@ fun ScheduleGrid(
     dayOrder: List<Int> = (1..7).toList(),
     compact: Boolean = false,
     beforeGrid: @Composable () -> Unit = {},
-    onCourseLongClick: (ScheduleCourseUi) -> Unit = {}
+    onCourseLongClick: (ScheduleCourseUi) -> Unit = {},
+    studyBlocks: List<ScheduleStudyBlock> = emptyList(),
+    onStudyClick: (ScheduleStudyKind) -> Unit = {}
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
     val weeklyCourses = remember(courses, currentWeek) {
@@ -258,6 +262,19 @@ fun ScheduleGrid(
     val gridTint = MaterialTheme.colorScheme.surface.copy(alpha =
         if (darkGrid || com.tyust.course.manager.AppearanceSettingsManager.mode != com.tyust.course.manager.WallpaperMode.Preset) 0.86f else 0.18f)
     val timeColumnTint = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (darkGrid) 0.4f else 0.28f)
+    // 早/晚自习各占一整行：早在课表之上、晚在课表之下，固定行高；每天单独判一次冲突。
+    val studyRows = remember(visibleCourses, periodTimes, columns, studyBlocks) {
+        ScheduleStudyKind.entries.mapNotNull { kind ->
+            val block = studyBlocks.firstOrNull { it.kind == kind } ?: return@mapNotNull null
+            if (!block.enabled) return@mapNotNull null
+            Triple(kind, block, columns.associateWith { day ->
+                // 跨零点的自习要看次日的课；最后一列借下一周同一天（课表按周重复）。
+                val nextDay = columns.getOrNull(columns.indexOf(day) + 1) ?: columns.first()
+                studySlotsFor(day, nextDay, studyBlocks, visibleCourses, periodTimes)
+                    .firstOrNull { it.kind == kind }
+            })
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -285,6 +302,11 @@ fun ScheduleGrid(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         beforeGrid()
+        // 早自习压在最上面。
+        studyRows.filter { it.first == ScheduleStudyKind.Morning }.forEach { (kind, block, slots) ->
+            ScheduleStudyWeekRow(kind, block.name, block.start, columns, columnWidth, timeColumnWidth,
+                gridTint, timeColumnTint, slots) { onStudyClick(kind) }
+        }
         // 去卡片化：轻玻璃衬底压到很低，让壁纸渐变与网格线透上来。
         // 这个 alpha 是"顶栏芯片能不能看出折射"的直接开关——衬底一厚，
         // 白芯片压在白板上，折射再准也是白压白。
@@ -401,6 +423,12 @@ fun ScheduleGrid(
                     }
                 }
             }
+        }
+
+        // 晚自习掉在最下面。
+        studyRows.filter { it.first == ScheduleStudyKind.Evening }.forEach { (kind, block, slots) ->
+            ScheduleStudyWeekRow(kind, block.name, block.start, columns, columnWidth, timeColumnWidth,
+                gridTint, timeColumnTint, slots) { onStudyClick(kind) }
         }
 
             Row(

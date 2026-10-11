@@ -67,7 +67,9 @@ fun ScheduleScreen(
     onWidgetClick: () -> Unit = {},
     adjustments: ScheduleAdjustments = ScheduleAdjustments(),
     backgroundRefreshing: Boolean = false,
-    now: Long? = null
+    now: Long? = null,
+    studyBlocks: List<ScheduleStudyBlock> = emptyList(),
+    onStudyClick: (ScheduleStudyKind) -> Unit = {}
 ) {
     val issue = loadIssue ?: errorMessage.takeIf { it.isNotBlank() }?.let { ScheduleLoadIssue(ScheduleLoadIssue.Kind.Other, it) }
     val scope = rememberCoroutineScope()
@@ -168,7 +170,8 @@ fun ScheduleScreen(
                         pageScrolls, restoredScrolls, if (mode) dayOffset else weekOffset, reduced,
                         onWeekChange, onDayChange, onCourseClick, onCourseLongClick, onSettingsClick,
                         onShown = { week, day, scroll -> shownWeek = week; shownDay = day; activeScroll = scroll },
-                        onScroll = { if (mode) dayOffset = it else weekOffset = it })
+                        onScroll = { if (mode) dayOffset = it else weekOffset = it },
+                        studyBlocks = studyBlocks, onStudyClick = onStudyClick)
                 }
                 if (backgroundRefreshing && (issue == null || !issue.visibleWithCache())) {
                     Surface(Modifier.align(Alignment.TopEnd).padding(top = topInset + 8.dp, end = 16.dp)
@@ -210,7 +213,8 @@ private fun SchedulePages(
     scrolls: MutableMap<Pair<Boolean, Int>, ScrollState>, restored: MutableSet<ScrollState>, initialOffset: Int,
     reduced: Boolean, onWeek: (Int) -> Unit, onDay: (Int) -> Unit,
     onCourse: (ScheduleCourseUi) -> Unit, onLongClick: (ScheduleCourseUi) -> Unit, onCalendar: () -> Unit,
-    onShown: (Int, Int, ScrollState) -> Unit, onScroll: (Int) -> Unit
+    onShown: (Int, Int, ScrollState) -> Unit, onScroll: (Int) -> Unit,
+    studyBlocks: List<ScheduleStudyBlock> = emptyList(), onStudyClick: (ScheduleStudyKind) -> Unit = {}
 ) {
     val firstWeek = minOf(1, actualWeek, requestedWeek)
     val lastWeek = maxOf(ScheduleMaxWeeks, actualWeek, requestedWeek)
@@ -290,12 +294,20 @@ private fun SchedulePages(
                 isCurrent = !nextSemester && week == actualWeek && it.id in current && (it.occurrenceDate == null || it.occurrenceDate == ScheduleTimeBase.dateFromMillis(now)),
                 isNext = !nextSemester && week == actualWeek && it.id == next && (it.occurrenceDate == null || it.occurrenceDate == ScheduleTimeBase.dateFromMillis(now))) }
         }
-        if (dayView) ScheduleDayList(displayed, week, day, firstWeekDate, times,
-            preferences.compact, scroll, topInset, onCourse, onCourseLongClick = onLongClick,
-            agenda = agenda, now = now, isToday = !nextSemester && week == actualWeek && day == ScheduleDates.dayAt(now), onCalendar = onCalendar)
-        else ScheduleGrid(displayed, week, times, periodCount, onCourse, scrollState = scroll,
+        if (dayView) {
+            // 自习按天判冲突：跨零点的自习要看次日的课。
+            val studySlots = remember(visible, day, times, studyBlocks) {
+                val nextDay = dayOrder.getOrNull(dayOrder.indexOf(day) + 1) ?: dayOrder.firstOrNull() ?: day
+                studySlotsFor(day, nextDay, studyBlocks, visible, times)
+            }
+            ScheduleDayList(displayed, week, day, firstWeekDate, times,
+                preferences.compact, scroll, topInset, onCourse, onCourseLongClick = onLongClick,
+                agenda = agenda, now = now, isToday = !nextSemester && week == actualWeek && day == ScheduleDates.dayAt(now), onCalendar = onCalendar,
+                studySlots = studySlots, onStudyClick = onStudyClick)
+        } else ScheduleGrid(displayed, week, times, periodCount, onCourse, scrollState = scroll,
             topInset = topInset, showWeekend = preferences.showWeekend, dayOrder = dayOrder,
-            compact = preferences.compact, onCourseLongClick = onLongClick)
+            compact = preferences.compact, onCourseLongClick = onLongClick,
+            studyBlocks = studyBlocks, onStudyClick = onStudyClick)
     }
 }
 
