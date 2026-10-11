@@ -8,7 +8,19 @@ data class CourseReminderKey(val account: String, val term: String, val courseId
 }
 
 data class CourseReminder(val key: CourseReminderKey, val course: ScheduleCourseRecord, val enabled: Boolean = false,
-    val leadMinutes: Int = 15, val revision: Long = 1L, val customLead: Boolean = false)
+    val leadMinutes: Int = 15, val revision: Long = 1L, val customLead: Boolean = false,
+    val study: StudyReminderSpec? = null)
+
+/**
+ * 自习提醒的附加信息：这条记录代表「某个星期几的一段自习」，时间来自自习配置而不是节次表。
+ * [blockedWeeks] 是被课程占掉、因此不排提醒的教学周。
+ */
+data class StudyReminderSpec(val kind: ScheduleStudyKind, val day: Int, val name: String,
+    val start: String = kind.defaultStart, val end: String = kind.defaultEnd,
+    val blockedWeeks: Set<Int> = emptySet()) {
+    val block: ScheduleStudyBlock
+        get() = ScheduleStudyBlock(kind, enabled = true, name = name, start = start, end = end, days = setOf(day))
+}
 
 data class ScheduleTimeBase(val firstWeekDate: String = "", val periodStarts: Map<Int, String> = emptyMap(),
     val periodEnds: Map<Int, String> = emptyMap(), val adjustments: ScheduleAdjustments = ScheduleAdjustments()) {
@@ -33,13 +45,42 @@ data class ReminderStatus(val availability: ReminderAvailability, val next: Plan
 object CourseReminderPlanner {
     fun occurrence(reminder: CourseReminder, timeBase: ScheduleTimeBase?, startsAt: Long,
         zone: TimeZone = TimeZone.getDefault()): ScheduleOccurrence? =
-        ScheduleOccurrenceResolver.resolve(listOf(reminder.course), timeBase, zone, requireEnd = false).firstOrNull { it.startsAt == startsAt }
+        if (reminder.study != null) studyOccurrences(reminder, timeBase, zone).firstOrNull { it.startsAt == startsAt }
+        else ScheduleOccurrenceResolver.resolve(listOf(reminder.course), timeBase, zone, requireEnd = false).firstOrNull { it.startsAt == startsAt }
+
+    /** 自习在各教学周的时段；被课程占掉的教学周（[StudyReminderSpec.blockedWeeks]）不排提醒。 */
+    fun studyOccurrences(reminder: CourseReminder, timeBase: ScheduleTimeBase?,
+        zone: TimeZone = TimeZone.getDefault()): List<ScheduleOccurrence> {
+        val spec = reminder.study ?: return emptyList()
+        val anchor = timeBase?.firstWeekDate ?: return emptyList()
+        val block = spec.block
+        val result = mutableListOf<ScheduleOccurrence>()
+        for (week in 1..ScheduleMaxWeeks) {
+            if (week in spec.blockedWeeks) continue
+            val day = ScheduleDates.date(anchor, week, spec.day, zone) ?: continue
+            val span = block.spanOn(day, zone) ?: continue
+            result.add(ScheduleOccurrence(reminder.course, span.first, span.second,
+                ScheduleTimeBase.dateFromMillis(span.first, zone)))
+        }
+        return result
+    }
 
     fun plan(reminder: CourseReminder, timeBase: ScheduleTimeBase?, now: Long, permissions: ReminderPermissions,
         activeAccount: String, zone: TimeZone = TimeZone.getDefault()): ReminderStatus {
         if (!reminder.enabled) return ReminderStatus(ReminderAvailability.Off)
         if (reminder.key.account != activeAccount || activeAccount.isBlank()) return ReminderStatus(ReminderAvailability.InactiveAccount)
         if (!permissions.available) return ReminderStatus(ReminderAvailability.NeedsPermission)
+        val study = reminder.study
+        if (study != null) {
+            if (study.day !in 1..7 || reminder.leadMinutes !in 0..1440) return ReminderStatus(ReminderAvailability.NeedsTime)
+            if (ScheduleDates.firstWeekDate(timeBase?.firstWeekDate ?: "", zone) == null)
+                return ReminderStatus(ReminderAvailability.NeedsTime)
+            for (occurrence in studyOccurrences(reminder, timeBase, zone)) {
+                val trigger = occurrence.startsAt - reminder.leadMinutes * 60_000L
+                if (trigger > now) return ReminderStatus(ReminderAvailability.Scheduled, PlannedReminder(reminder, trigger, occurrence.startsAt))
+            }
+            return ReminderStatus(ReminderAvailability.NoUpcoming)
+        }
         val course = reminder.course
         val weeks = ScheduleWeeks.parse(course.weeks)
         if (!weeks.valid) return ReminderStatus(ReminderAvailability.InvalidWeeks)
@@ -50,7 +91,7 @@ object CourseReminderPlanner {
             course.startPeriod < 1 || course.endPeriod < course.startPeriod || reminder.leadMinutes !in 0..1440) {
             return ReminderStatus(ReminderAvailability.NeedsTime)
         }
-        if (ScheduleDates.firstMonday(timeBase.firstWeekDate, zone) == null)
+        if (ScheduleDates.firstWeekDate(timeBase.firstWeekDate, zone) == null)
             return ReminderStatus(ReminderAvailability.NeedsTime)
         for (occurrence in ScheduleOccurrenceResolver.resolve(listOf(course), timeBase, zone, requireEnd = false)) {
             val startsAt = occurrence.startsAt

@@ -178,6 +178,9 @@ android {
         unitTests.all {
             maxHeapSize = '2g'
             systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+            // 单测固定按 UTC 跑：CI（ubuntu-latest）本来就是 UTC，本机（CST）也跟着对齐，
+            // 否则依赖默认时区的用例会在本机通过、在 CI 失败。
+            systemProperty 'user.timezone', 'UTC'
         }
     }
 }
