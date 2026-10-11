@@ -82,16 +82,16 @@ class ScheduleStudyBlockTest {
     fun `any real overlap with a course counts and touching ends do not`() {
         val evening = ScheduleStudyBlock.default(ScheduleStudyKind.Evening)
         // 完全被课程盖住
-        assertTrue(evening.overlaps(minutesOf(2026, Calendar.OCTOBER, 12, 19, 0), minutesOf(2026, Calendar.OCTOBER, 12, 20, 0)))
+        assertTrue(evening.overlaps(minutesOf(2026, Calendar.OCTOBER, 12, 19, 0), minutesOf(2026, Calendar.OCTOBER, 12, 20, 0), zone))
         // 只有一小段重叠
-        assertTrue(evening.overlaps(minutesOf(2026, Calendar.OCTOBER, 12, 20, 30), minutesOf(2026, Calendar.OCTOBER, 12, 21, 30)))
+        assertTrue(evening.overlaps(minutesOf(2026, Calendar.OCTOBER, 12, 20, 30), minutesOf(2026, Calendar.OCTOBER, 12, 21, 30), zone))
         // 端点相接不算
-        assertFalse(evening.overlaps(minutesOf(2026, Calendar.OCTOBER, 12, 16, 0), minutesOf(2026, Calendar.OCTOBER, 12, 18, 20)))
-        assertFalse(evening.overlaps(minutesOf(2026, Calendar.OCTOBER, 12, 20, 45), minutesOf(2026, Calendar.OCTOBER, 12, 22, 0)))
+        assertFalse(evening.overlaps(minutesOf(2026, Calendar.OCTOBER, 12, 16, 0), minutesOf(2026, Calendar.OCTOBER, 12, 18, 20), zone))
+        assertFalse(evening.overlaps(minutesOf(2026, Calendar.OCTOBER, 12, 20, 45), minutesOf(2026, Calendar.OCTOBER, 12, 22, 0), zone))
         // 白天的课不碰晚自习
-        assertFalse(evening.overlaps(minutesOf(2026, Calendar.OCTOBER, 12, 8, 10), minutesOf(2026, Calendar.OCTOBER, 12, 9, 45)))
+        assertFalse(evening.overlaps(minutesOf(2026, Calendar.OCTOBER, 12, 8, 10), minutesOf(2026, Calendar.OCTOBER, 12, 9, 45), zone))
         // 周五没有晚自习
-        assertFalse(evening.overlaps(minutesOf(2026, Calendar.OCTOBER, 16, 19, 0), minutesOf(2026, Calendar.OCTOBER, 16, 20, 0)))
+        assertFalse(evening.overlaps(minutesOf(2026, Calendar.OCTOBER, 16, 19, 0), minutesOf(2026, Calendar.OCTOBER, 16, 20, 0), zone))
     }
 
     @Test

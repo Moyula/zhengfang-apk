@@ -59,10 +59,10 @@ data class ScheduleStudyBlock(
         return start.timeInMillis to end.timeInMillis
     }
 
-    /** 与一段课程时间有真实交集才算重叠（端点相接不算）。 */
-    fun overlaps(from: Long, to: Long): Boolean {
-        val day = Calendar.getInstance().apply { timeInMillis = from }
-        val span = spanOn(day) ?: return false
+    /** 与一段课程时间有真实交集才算重叠（端点相接不算）。[zone] 决定这段毫秒落在哪一天。 */
+    fun overlaps(from: Long, to: Long, zone: TimeZone = TimeZone.getDefault()): Boolean {
+        val day = Calendar.getInstance(zone).apply { timeInMillis = from }
+        val span = spanOn(day, zone) ?: return false
         return span.first < to && from < span.second
     }
 
