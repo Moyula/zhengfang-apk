@@ -182,11 +182,14 @@ fun ScheduleRoute(isActive: Boolean = true) {
     val reminderScheduler = remember(context) { ScheduleReminderScheduler.get(context) }
     val customRevision = settingsManager.revision
     val customCourses = remember(customRevision, routeAccountKey) { settingsManager.getCustomCourses(routeAccountKey) }
-    // 早/晚自习与课表共用一份数据：设置页改完，课表要立刻跟着变。
-    val studyBlocks = remember(customRevision, routeAccountKey) { settingsManager.getStudyBlocks(routeAccountKey) }
     var editingStudyKind by remember { mutableStateOf<ScheduleStudyKind?>(null) }
     val remindersRevision = reminderScheduler.revision
     val settingsTerm = settingsTermOverride ?: resolvedTermId
+    // 早/晚自习与课表共用一份数据，并且按「账号 + 当前浏览的学期」隔离：
+    // 设置页改完课表要立刻跟着变，同账号切到下学期也不能覆盖本学期。
+    val studyBlocks = remember(customRevision, routeAccountKey, settingsTerm) {
+        settingsManager.getStudyBlocks(routeAccountKey, settingsTerm)
+    }
     val termTimeBase = remember(settingsTerm, remindersRevision, customRevision, actualTermId) {
         scheduleRepository.timeBase(routeAccountKey, settingsTerm, actualTermId)
     }
@@ -201,11 +204,17 @@ fun ScheduleRoute(isActive: Boolean = true) {
     LaunchedEffect(reminderRequest) {
         if (reminderRequest != null) {
             detailSourceBounds = null
-            reminderScheduler.findById(reminderRequest)?.let {
-                notificationCourseJson = ReminderJson.reminder(it).toString()
-                notificationStartsAt = CourseReminderNavigation.requestedStartsAt
-                detailOccurrenceDate = notificationStartsAt?.let(ScheduleTimeBase::dateFromMillis)
-                detailId = it.course.id
+            reminderScheduler.findById(reminderRequest)?.let { reminder ->
+                val study = reminder.study
+                if (study != null) {
+                    // 自习提醒点开的是同一份自习编辑面板，而不是课程详情。
+                    editingStudyKind = study.kind
+                } else {
+                    notificationCourseJson = ReminderJson.reminder(reminder).toString()
+                    notificationStartsAt = CourseReminderNavigation.requestedStartsAt
+                    detailOccurrenceDate = notificationStartsAt?.let(ScheduleTimeBase::dateFromMillis)
+                    detailId = reminder.course.id
+                }
             }
             CourseReminderNavigation.consume()
         }
@@ -543,7 +552,11 @@ fun ScheduleRoute(isActive: Boolean = true) {
             ScheduleSettingsScreen(
                 manager = settingsManager,
                 studyBlocks = studyBlocks,
-                onStudyBlockChange = { settingsManager.saveStudyBlock(it, routeAccountKey) },
+                onStudyBlockChange = { block ->
+                    settingsManager.saveStudyBlock(block, routeAccountKey, settingsTerm)
+                    // 自习提醒走课程提醒同一条流水线：保存后立刻按新时间/新星期/新冲突重排。
+                    reminderScheduler.reconcile()
+                },
                 defaultLead = reminderScheduler.defaultLead(routeAccountKey),
                 onDefaultLead = { reminderScheduler.setDefaultLead(routeAccountKey, it) },
                 onAdjustments = { adjustmentCourseId = null; showAdjustments = true },
@@ -586,6 +599,9 @@ fun ScheduleRoute(isActive: Boolean = true) {
                         val times = periodTimesFor(termTimeBase)
                         reminderScheduler.updateTimeBase(routeAccountKey, settingsTerm, ScheduleTimeBase(
                             ScheduleTimeBase.dateFromMillis(realigned), times.associate { it.period to it.startTime }, times.associate { it.period to it.endTime }))
+                        // 切换每周第一天会整体挪动教学周日期：归一化后的日历可能被判成「没变」，
+                        // 所以这里把它当成独立的日历变更，显式重排该账号该学期已登记的闹钟。
+                        reminderScheduler.reschedule(routeAccountKey, settingsTerm)
                         if (!isNextSemester && settingsTerm == resolvedTermId) pendingToday = true
                     }
                 },
@@ -672,7 +688,11 @@ fun ScheduleRoute(isActive: Boolean = true) {
         com.tyust.course.ui.screen.ScheduleStudySheet(
             block = studyBlocks.firstOrNull { it.kind == kind } ?: ScheduleStudyBlock.default(kind),
             onDismiss = { editingStudyKind = null },
-            onSave = { settingsManager.saveStudyBlock(it, routeAccountKey); editingStudyKind = null })
+            onSave = {
+                settingsManager.saveStudyBlock(it, routeAccountKey, settingsTerm)
+                reminderScheduler.reconcile()
+                editingStudyKind = null
+            })
     }
     if (showAdjustments) com.tyust.course.ui.system.GlassSubpage(onDismiss = { showAdjustments = false }) { close ->
         com.tyust.course.ui.screen.ScheduleAdjustmentsScreen(courses, displayedTimeBase, periodCount,

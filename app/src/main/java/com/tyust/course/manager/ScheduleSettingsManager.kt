@@ -373,21 +373,45 @@ class ScheduleSettingsManager internal constructor(private var prefs: SharedPref
 
     // ============ 早自习 / 晚自习 ============
 
+    /**
+     * 自习配置按账号 + 学期隔离：学期用实际浏览的学期 id，同账号切换下学期不会覆盖本学期。
+     * 无学期（列表还没加载出来）时退回到 `default` 桶。
+     */
+    private fun studyBlocksKey(accountKey: String, term: String): String =
+        "${KEY_STUDY_BLOCKS}_${accountKey}_${term.ifBlank { "default" }}"
+
+    private fun readStudyBlocks(accountKey: String, term: String): String? {
+        val p = prefs ?: return null
+        val scoped = studyBlocksKey(accountKey, term)
+        if (p.contains(scoped)) return p.getString(scoped, null)
+        // 1.0.116 及更早只按账号（甚至全局）存，首次按学期读取时迁到账号+学期键上。
+        val legacy = listOf("${KEY_STUDY_BLOCKS}_$accountKey", KEY_STUDY_BLOCKS).firstOrNull { p.contains(it) } ?: return null
+        val value = p.getString(legacy, null)
+        p.edit().putString(scoped, value).remove(legacy).apply()
+        return value
+    }
+
     /** 两种自习永远各返回一条（存档缺失回落默认值），按账号+学期隔离。 */
-    @JvmOverloads fun getStudyBlocks(accountKey: String = accountStorageKey()): List<ScheduleStudyBlock> =
-        ScheduleStudyBlock.decode(getScopedString(KEY_STUDY_BLOCKS, accountKey))
+    @JvmOverloads fun getStudyBlocks(accountKey: String = accountStorageKey(), term: String = ""): List<ScheduleStudyBlock> =
+        ScheduleStudyBlock.decode(readStudyBlocks(accountKey, term))
 
     @JvmOverloads fun getStudyBlock(
         kind: ScheduleStudyKind,
-        accountKey: String = accountStorageKey()
-    ): ScheduleStudyBlock = getStudyBlocks(accountKey).firstOrNull { it.kind == kind }
+        accountKey: String = accountStorageKey(),
+        term: String = ""
+    ): ScheduleStudyBlock = getStudyBlocks(accountKey, term).firstOrNull { it.kind == kind }
         ?: ScheduleStudyBlock.default(kind)
 
-    fun saveStudyBlock(block: ScheduleStudyBlock, accountKey: String = accountStorageKey()) {
-        val blocks = getStudyBlocks(accountKey).map { if (it.kind == block.kind) block else it }
+    @JvmOverloads fun saveStudyBlock(
+        block: ScheduleStudyBlock,
+        accountKey: String = accountStorageKey(),
+        term: String = ""
+    ) {
+        val blocks = getStudyBlocks(accountKey, term).map { if (it.kind == block.kind) block else it }
         prefs?.edit()
-            ?.putString("${KEY_STUDY_BLOCKS}_$accountKey", ScheduleStudyBlock.encode(blocks))
+            ?.putString(studyBlocksKey(accountKey, term), ScheduleStudyBlock.encode(blocks))
             ?.remove(KEY_STUDY_BLOCKS)
+            ?.remove("${KEY_STUDY_BLOCKS}_$accountKey")
             ?.apply()
         revision++
     }

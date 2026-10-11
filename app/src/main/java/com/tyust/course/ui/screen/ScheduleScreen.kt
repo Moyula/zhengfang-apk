@@ -263,14 +263,15 @@ fun ScheduleGrid(
         if (darkGrid || com.tyust.course.manager.AppearanceSettingsManager.mode != com.tyust.course.manager.WallpaperMode.Preset) 0.86f else 0.18f)
     val timeColumnTint = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (darkGrid) 0.4f else 0.28f)
     // 早/晚自习各占一整行：早在课表之上、晚在课表之下，固定行高；每天单独判一次冲突。
-    val studyRows = remember(visibleCourses, periodTimes, columns, studyBlocks) {
+    val studyRows = remember(visibleCourses, courses, periodTimes, columns, dayOrder, currentWeek, studyBlocks) {
         ScheduleStudyKind.entries.mapNotNull { kind ->
             val block = studyBlocks.firstOrNull { it.kind == kind } ?: return@mapNotNull null
             if (!block.enabled) return@mapNotNull null
             Triple(kind, block, columns.associateWith { day ->
-                // 跨零点的自习要看次日的课；最后一列借下一周同一天（课表按周重复）。
-                val nextDay = columns.getOrNull(columns.indexOf(day) + 1) ?: columns.first()
-                studySlotsFor(day, nextDay, studyBlocks, visibleCourses, periodTimes)
+                // 跨零点的自习看真实次日的课：判定用完整 7 天顺序，隐藏周末不影响结果，
+                // 一周最后一天借下一周（课表按周重复）。
+                studySlotsFor(day, studyBlocks, visibleCourses, periodTimes,
+                    nextDayStudySpans(day, currentWeek, dayOrder, courses, periodTimes))
                     .firstOrNull { it.kind == kind }
             })
         }

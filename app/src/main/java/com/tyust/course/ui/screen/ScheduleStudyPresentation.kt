@@ -65,21 +65,40 @@ internal fun studySpansOf(
 }
 
 /**
- * 某天要显示的自习。课程列表已经是「本周 + 调课之后」的可见课程，
- * 所以这里判重就直接用它们；跨零点的自习再看一眼次日的课。
+ * 某天要显示的自习。跨零点的自习要看**真实次日**的课，而次日可能落在下一周，
+ * 也可能因为「隐藏周末」而不在可见列里，所以次日占用必须由调用方按日期算好传进来。
  */
 internal fun studySlotsFor(
     day: Int,
-    nextDay: Int,
     blocks: List<ScheduleStudyBlock>,
-    courses: List<ScheduleCourseUi>,
-    times: List<PeriodTimeUi>
+    dayCourses: List<ScheduleCourseUi>,
+    times: List<PeriodTimeUi>,
+    nextDaySpans: List<StudySpan> = emptyList()
 ): List<ScheduleStudySlot> = ScheduleStudyPlanner.slots(
     day = day,
     blocks = blocks,
-    daySpans = studySpansOf(day, courses, times),
-    nextDaySpans = studySpansOf(nextDay, courses, times)
+    daySpans = studySpansOf(day, dayCourses, times),
+    nextDaySpans = nextDaySpans
 )
+
+/**
+ * 真实次日的课程占用：[order] 必须是完整的 7 天顺序（不受「隐藏周末」影响），
+ * 走到一周最后一天时次日算下一周，因此跨周与调课都跟着课表本身走。
+ */
+internal fun nextDayStudySpans(
+    day: Int,
+    week: Int,
+    order: List<Int>,
+    courses: List<ScheduleCourseUi>,
+    times: List<PeriodTimeUi>
+): List<StudySpan> {
+    val index = order.indexOf(day)
+    if (index < 0) return emptyList()
+    val wraps = index == order.lastIndex
+    val nextDay = if (wraps) order.first() else order[index + 1]
+    val nextWeek = if (wraps) week + 1 else week
+    return studySpansOf(nextDay, courses.filter { isInWeek(it.weeks, nextWeek) }, times)
+}
 
 /** 周视图里的一整行自习：左侧时间槽 + 每天一格。 */
 @Composable

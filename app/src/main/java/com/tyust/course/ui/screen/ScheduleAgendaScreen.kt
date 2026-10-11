@@ -295,10 +295,10 @@ private fun SchedulePages(
                 isNext = !nextSemester && week == actualWeek && it.id == next && (it.occurrenceDate == null || it.occurrenceDate == ScheduleTimeBase.dateFromMillis(now))) }
         }
         if (dayView) {
-            // 自习按天判冲突：跨零点的自习要看次日的课。
-            val studySlots = remember(visible, day, times, studyBlocks) {
-                val nextDay = dayOrder.getOrNull(dayOrder.indexOf(day) + 1) ?: dayOrder.firstOrNull() ?: day
-                studySlotsFor(day, nextDay, studyBlocks, visible, times)
+            // 自习按天判冲突：跨零点的自习要看真实次日（可能落在下一周）的课，与可见列无关。
+            val studySlots = remember(visible, day, week, times, studyBlocks, courses, dayOrder) {
+                studySlotsFor(day, studyBlocks, visible, times,
+                    nextDayStudySpans(day, week, dayOrder, courses, times))
             }
             ScheduleDayList(displayed, week, day, firstWeekDate, times,
                 preferences.compact, scroll, topInset, onCourse, onCourseLongClick = onLongClick,

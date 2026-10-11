@@ -144,4 +144,38 @@ class ScheduleStudyBlockTest {
         assertFalse(manager.getStudyBlock(ScheduleStudyKind.Evening, "acct-a").enabled)
         assertEquals("早读", manager.getStudyBlock(ScheduleStudyKind.Morning, "acct-a").name)
     }
+
+    /** 复审 P2-c：同账号切到下学期不能覆盖本学期的自习配置。 */
+    @Test
+    fun `study blocks are stored per account and term`() {
+        val manager = ScheduleSettingsManager(MemoryPreferences())
+        manager.saveStudyBlock(
+            ScheduleStudyBlock.default(ScheduleStudyKind.Morning).copy(enabled = true, name = "本学期早读"),
+            "acct-a", "2026-2027-1"
+        )
+        // 下学期：默认值，不被本学期覆盖
+        assertEquals(ScheduleStudyBlock.default(ScheduleStudyKind.Morning),
+            manager.getStudyBlock(ScheduleStudyKind.Morning, "acct-a", "2026-2027-2"))
+
+        manager.saveStudyBlock(
+            ScheduleStudyBlock.default(ScheduleStudyKind.Morning).copy(enabled = true, name = "下学期早读", start = "07:00"),
+            "acct-a", "2026-2027-2"
+        )
+        assertEquals("下学期早读", manager.getStudyBlock(ScheduleStudyKind.Morning, "acct-a", "2026-2027-2").name)
+        // 本学期的配置与另一个账号都不受影响
+        assertEquals("本学期早读", manager.getStudyBlock(ScheduleStudyKind.Morning, "acct-a", "2026-2027-1").name)
+        assertEquals(ScheduleStudyBlock.default(ScheduleStudyKind.Morning),
+            manager.getStudyBlock(ScheduleStudyKind.Morning, "acct-b", "2026-2027-1"))
+    }
+
+    /** 老存档只按账号存：首次按学期读取要迁过来，不能丢配置。 */
+    @Test
+    fun `legacy account scoped study blocks migrate to the term scoped key`() {
+        val preferences = MemoryPreferences()
+        preferences.edit().putString("study_blocks_acct-a",
+            ScheduleStudyBlock.encode(listOf(ScheduleStudyBlock.default(ScheduleStudyKind.Morning).copy(enabled = true, name = "旧早读")))).apply()
+        val manager = ScheduleSettingsManager(preferences)
+        assertEquals("旧早读", manager.getStudyBlock(ScheduleStudyKind.Morning, "acct-a", "2026-2027-1").name)
+        assertFalse(preferences.contains("study_blocks_acct-a"))
+    }
 }

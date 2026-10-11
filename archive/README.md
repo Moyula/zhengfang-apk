@@ -51,7 +51,7 @@
 - `docs/glass-lens-api32.md`（1.0.70 新增的 API 31/32 折射设计说明）
 - `docs/testing/2026-09-13-api32-fixes.md`（1.0.76 的对照结果）
 - `verification.json`、`ACCEPTANCE.md` 等交付目录产物（见 `docs/ISSUES-50-51.md`、`docs/ISSUES-41-49-ACCEPTANCE.md`）
-- `spec/PLUGIN-PLATFORM-RELEASE.md` 原先指向的 `../plugins/spec/PLUGIN-PLATFORM-RELEASE.md` 及对应线上地址（已 404）
+- `spec/PLUGIN-PLATFORM-RELEASE.md` 原先指向的 `../plugins/spec/PLUGIN-PLATFORM-RELEASE.md`（2026-10 订正：完整规范**并未移除**，仍由平台仓库 `znjhahaha/zhengfang-plugins` 的 `spec/PLUGIN-PLATFORM-RELEASE.md` 维护，上游维护者已用授权 API 读到该文件；该仓库对匿名 / raw 请求返回 404，**不能据此判断文件不存在**。本机若未检出同级 `plugins` 工作区，请以授权访问的线上文件为准）
 
 ## 维护约定
 

@@ -116,7 +116,8 @@ class ScheduleReminderScheduler private constructor(private val context: Context
         val byId = courses.associateBy { it.id }
         val old = records()
         val updated = old.mapNotNull { reminder ->
-            if (reminder.key.account != account || reminder.key.term != term) reminder else {
+            // 自习记录由 StudyReminders 单独维护，课表快照不能把它们当「失效课程」丢掉。
+            if (reminder.study != null || reminder.key.account != account || reminder.key.term != term) reminder else {
                 byId[reminder.key.courseId]?.let { course ->
                     if (reminder.course == course) reminder else reminder.copy(course = course, revision = reminder.revision + 1)
                 }
@@ -246,6 +247,9 @@ class ScheduleReminderScheduler private constructor(private val context: Context
 
     @Synchronized
     fun reconcile(resetAlarms: Boolean = false) {
+        val before = records()
+        val synced = withStudyReminders(before)
+        if (synced != before) save(synced)
         if (resetAlarms) scheduledPlans().values.forEach { alarms.cancel(it.reminder.key) }
         val permission = permissions()
         try {
@@ -254,6 +258,36 @@ class ScheduleReminderScheduler private constructor(private val context: Context
             scheduledPlans().values.forEach { alarms.cancel(it.reminder.key) }
         }
         revision++
+    }
+
+    /**
+     * 按「课表 + 自习配置 + 学期提醒总开关」重算自习提醒：自习和课程共用同一批闹钟，
+     * 因此课程变动、删除课程、换学期都会在下次 reconcile 时把自习提醒一并对齐。
+     */
+    private fun withStudyReminders(reference: List<CourseReminder>): List<CourseReminder> {
+        var result = reference
+        for ((account, term) in reference.map { it.key.account to it.key.term }.distinct()) {
+            val courses = result.filter { it.key.account == account && it.key.term == term && it.study == null }.map { it.course }
+            val enabled = result.any { it.key.account == account && it.key.term == term && it.study == null && it.enabled }
+            result = StudyReminders.update(result, account, term, studyBlocks(account, term), courses,
+                timeBase(account, term), enabled, defaultLead(account))
+        }
+        return result
+    }
+
+    private fun studyBlocks(account: String, term: String): List<ScheduleStudyBlock> =
+        ScheduleSettingsManager.getInstance().apply { init(context) }.getStudyBlocks(account, term)
+
+    /**
+     * 日历本身变了（例如切换每周第一天）：已登记的闹钟必须按新日历重排，
+     * 不能依赖「归一化后的日历比较」来决定是否重算。
+     */
+    @Synchronized
+    fun reschedule(account: String, term: String): Boolean {
+        if (account.isBlank() || term.isBlank()) return false
+        records().filter { it.key.account == account && it.key.term == term }.forEach { alarms.cancel(it.key) }
+        reconcile()
+        return true
     }
 
     @Synchronized
@@ -280,9 +314,11 @@ class ScheduleReminderScheduler private constructor(private val context: Context
             }
             val content = PendingIntent.getActivity(context, 0, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             val course = occurrence(record, plan.startsAt)?.course ?: record.course
+            val study = record.study
             val notification = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_course_reminder)
-                .setContentTitle("${course.name} · 即将上课")
-                .setContentText(listOf(course.location, "第 ${course.startPeriod}-${course.endPeriod} 节").filter { it.isNotBlank() }.joinToString(" · "))
+                .setContentTitle(if (study == null) "${course.name} · 即将上课" else "${course.name} · 即将开始")
+                .setContentText(if (study == null) listOf(course.location, "第 ${course.startPeriod}-${course.endPeriod} 节").filter { it.isNotBlank() }.joinToString(" · ")
+                    else "${study.start} – ${study.end}")
                 .setContentIntent(content).setAutoCancel(true).setOnlyAlertOnce(true).build()
             try { NotificationManagerCompat.from(context).notify(id, 1, notification) } catch (_: SecurityException) { }
         }

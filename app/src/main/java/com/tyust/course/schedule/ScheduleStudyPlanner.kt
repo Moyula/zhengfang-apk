@@ -31,6 +31,13 @@ object ScheduleStudyPlanner {
         start < span.second && span.first < end
 
     /**
+     * 绝对时段版本，用于日历计算（提醒、统计）：课程按真实日期展开成 occurrence，
+     * 因此跨零点、跨周与调课都由同一份数据决定，端点相接同样不算重叠。
+     */
+    fun blocked(span: Pair<Long, Long>, courses: List<ScheduleOccurrence>): Boolean =
+        courses.any { it.startsAt < span.second && span.first < it.endsAt }
+
+    /**
      * @param daySpans 当天课程的占用区间
      * @param nextDaySpans 次日课程的占用区间，用于跨零点的自习
      * @return 该日应该画出来的自习；被课程压住或未开启时返回 null
