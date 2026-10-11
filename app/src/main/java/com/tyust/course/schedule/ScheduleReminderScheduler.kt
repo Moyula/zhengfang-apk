@@ -37,6 +37,8 @@ class ScheduleReminderScheduler private constructor(private val context: Context
     private val calendars = ScheduleCalendarStore(preferences) {
         ScheduleSettingsManager.getInstance().apply { init(context) }.getWeekStart()
     }
+    /** 自习冲突判定用的完整课表快照（提醒记录只覆盖开启了提醒的课程）。 */
+    private val snapshots = ScheduleCourseSnapshotStore(preferences)
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var started = false
@@ -103,7 +105,10 @@ class ScheduleReminderScheduler private constructor(private val context: Context
         if (account != activeAccount() || account.isBlank() || term.isBlank() || courses.isEmpty()) return false
         val old = records()
         val updated = SemesterReminders.update(old, account, term, courses, enabled, defaultLead(account))
-        if (updated != old) { save(updated); reconcile() }
+        // 顺手把完整课表快照留下来：批次里没开提醒的课程也要参与自习判重。
+        snapshots.write(account, term, courses)
+        if (updated != old) save(updated)
+        reconcile()
         return true
     }
 
@@ -124,6 +129,7 @@ class ScheduleReminderScheduler private constructor(private val context: Context
             }
         }
         if (updated != old) save(updated)
+        snapshots.write(account, term, courses)
         reconcile()
     }
 
@@ -133,6 +139,9 @@ class ScheduleReminderScheduler private constructor(private val context: Context
         val updated = old.map { if (it.key.account == account && it.key.courseId == course.id && it.course != course)
             it.copy(course = course, revision = it.revision + 1) else it }
         if (old != updated) save(updated)
+        snapshots.update(account) { list ->
+            if (list.any { it.id == course.id }) list.map { if (it.id == course.id) course else it } else list + course
+        }
         reconcile()
     }
 
@@ -141,6 +150,7 @@ class ScheduleReminderScheduler private constructor(private val context: Context
         val old = records()
         val removed = old.filter { it.key.account == account && it.key.courseId == courseId }
         save(old - removed.toSet())
+        snapshots.update(account) { list -> list.filterNot { it.id == courseId } }
         reconcile()
         return removed
     }
@@ -148,6 +158,7 @@ class ScheduleReminderScheduler private constructor(private val context: Context
     @Synchronized
     fun clearAccount(account: String) {
         save(records().filter { it.key.account != account })
+        snapshots.clear(account)
         val editor = preferences.edit()
         preferences.all.keys.filter { it.startsWith("calendar:$account|") }.forEach { editor.remove(it) }
         editor.remove("legacy-calendar-migrated:$account")
@@ -267,9 +278,9 @@ class ScheduleReminderScheduler private constructor(private val context: Context
     private fun withStudyReminders(reference: List<CourseReminder>): List<CourseReminder> {
         var result = reference
         for ((account, term) in reference.map { it.key.account to it.key.term }.distinct()) {
-            val courses = result.filter { it.key.account == account && it.key.term == term && it.study == null }.map { it.course }
             val enabled = result.any { it.key.account == account && it.key.term == term && it.study == null && it.enabled }
-            result = StudyReminders.update(result, account, term, studyBlocks(account, term), courses,
+            // 冲突判定用账号 + 学期的完整课表快照：新课程即使没开自己的提醒，也要参与自习判重。
+            result = StudyReminders.sync(result, account, term, studyBlocks(account, term), snapshots.read(account, term),
                 timeBase(account, term), enabled, defaultLead(account))
         }
         return result

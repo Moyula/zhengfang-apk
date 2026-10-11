@@ -47,6 +47,16 @@ internal object ReminderJson {
         (0 until list.length()).mapNotNull { runCatching { reminder(list.getJSONObject(it)) }.getOrNull() }
     }.getOrDefault(emptyList())
 
+    /** 账号 + 学期的完整课表快照，供自习冲突判定用（提醒记录只覆盖开启了提醒的课程）。 */
+    fun courses(values: List<ScheduleCourseRecord>): String = JSONArray().apply { values.forEach { put(course(it)) } }.toString()
+    fun courses(value: String?): List<ScheduleCourseRecord>? {
+        val text = value ?: return null
+        return runCatching {
+            val list = JSONArray(text)
+            (0 until list.length()).mapNotNull { runCatching { course(list.getJSONObject(it)) }.getOrNull() }
+        }.getOrNull()
+    }
+
     fun timeBase(value: ScheduleTimeBase) = JSONObject().apply {
         put("date", value.firstWeekDate)
         put("adjustments", ScheduleAdjustmentJson.encode(value.adjustments))

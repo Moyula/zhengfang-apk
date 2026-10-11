@@ -2,6 +2,7 @@ package com.tyust.course.schedule
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Calendar
@@ -125,6 +126,58 @@ class StudyRemindersTest {
         reconcileCourseReminders(records, account, { base.copy(firstWeekDate = "2026-09-06") }, allowed,
             time(1, 6, 0), alarms, zone)
         assertEquals(before - 7 * 86_400_000L, alarms.plans.values.single().triggerAt)
+    }
+
+    /** 评审第二轮 P1：判重必须看完整课表，不能只看「开了提醒的课程」。 */
+    @Test fun `a new course in the snapshot must block an existing study reminder`() {
+        val tuesday = ScheduleCourseRecord("custom:tue", "周二课", "", "", 2, 1, 2, "1-25周")
+        val records = SemesterReminders.update(emptyList(), account, term, listOf(tuesday), enabled = true, defaultLead = 15)
+        val study = ScheduleStudyBlock(ScheduleStudyKind.Morning, enabled = true, name = "早自习",
+            start = "08:10", end = "09:10", days = setOf(1))
+        // 刷新课表后新增的周一 08:00–08:45 课程：它没有自己的提醒，但必须压掉第 1–3 周的自习。
+        val added = ScheduleCourseRecord("custom:mon", "周一新课", "", "", 1, 1, 1, "1-3周")
+
+        // 旧行为：只从提醒记录反推课程 → 判重看不到新课程，本周自习照排。
+        val withoutSnapshot = StudyReminders.sync(records, account, term, listOf(study), null, base,
+            enabled = true, defaultLead = 15, zone = zone)
+        assertTrue(withoutSnapshot.single { it.study != null }.study!!.blockedWeeks.isEmpty())
+        assertEquals(time(7, 7, 55), CourseReminderPlanner.plan(withoutSnapshot.single { it.study != null }, base,
+            time(6, 20, 0), allowed, account, zone).next!!.triggerAt)
+
+        // 修复后：完整课表快照参与判重，闹钟推到第 4 周。
+        val synced = StudyReminders.sync(records, account, term, listOf(study), listOf(tuesday, added), base,
+            enabled = true, defaultLead = 15, zone = zone)
+        assertEquals(setOf(1, 2, 3), synced.single { it.study != null }.study!!.blockedWeeks)
+        assertEquals(time(28, 7, 55), CourseReminderPlanner.plan(synced.single { it.study != null }, base,
+            time(6, 20, 0), allowed, account, zone).next!!.triggerAt)
+        // 记录里更新过的副本（例如撤销删除的自定义课程）也要并进判重集合。
+        val restored = tuesday.copy(id = "custom:restored", day = 1, weeks = "5周")
+        val withRestoredRecord = StudyReminders.conflictCourses(listOf(tuesday), SemesterReminders.update(
+            emptyList(), account, term, listOf(restored), enabled = true, defaultLead = 15), account, term)
+        assertEquals(setOf("custom:tue", "custom:restored"), withRestoredRecord.map { it.id }.toSet())
+    }
+
+    /** 评审第二轮 P2：改回「跟随全局默认」必须丢掉旧的单条覆盖。 */
+    @Test fun `changing the lead back to the default replaces the old override`() {
+        val custom = StudyReminders.update(emptyList(), account, term, listOf(morning.copy(leadMinutes = 5)), emptyList(),
+            base, enabled = true, defaultLead = 15, zone = zone)
+        assertTrue(custom.all { it.leadMinutes == 5 && it.customLead })
+        val back = StudyReminders.update(custom, account, term, listOf(morning), emptyList(), base,
+            enabled = true, defaultLead = 15, zone = zone)
+        assertTrue(back.all { it.leadMinutes == 15 && !it.customLead })
+        // 回到「跟随全局默认」之后再改全局默认也要跟着走。
+        val global = StudyReminders.update(back, account, term, listOf(morning), emptyList(), base,
+            enabled = true, defaultLead = 25, zone = zone)
+        assertTrue(global.all { it.leadMinutes == 25 && !it.customLead })
+    }
+
+    /** 快照用 ReminderJson 持久化，格式必须能原样往返。 */
+    @Test fun `course snapshots round trip through the reminder json`() {
+        val courses = listOf(course, course.copy(id = "custom:two", day = 3, weeks = "1-16周(单)"),
+            ScheduleCourseRecord("custom:three", "体育", "王老师", "操场", 5, 3, 4, "1-25周", custom = true))
+        assertEquals(courses, ReminderJson.courses(ReminderJson.courses(courses)))
+        assertNull(ReminderJson.courses(null))
+        assertNull(ReminderJson.courses("not json"))
     }
 
     private class FakeAlarms : ReminderAlarmPort {
