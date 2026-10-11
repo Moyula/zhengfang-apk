@@ -97,6 +97,21 @@ private object ScheduleRouteMemoryCache {
     }
 }
 
+/** 撤销按钮的持久化恢复链；与课程编辑保存一样维护调度状态。 */
+internal fun restoreDeletedCustomCourse(
+    settingsManager: ScheduleSettingsManager,
+    reminderScheduler: ScheduleReminderScheduler,
+    account: String,
+    record: ScheduleCourseRecord,
+    remindersJson: String
+) {
+    settingsManager.updateCustomCourse(ScheduleSettingsManager.CustomCourse(record.id.removePrefix("custom:"), record.name,
+        record.location, record.teacher, record.day, record.startPeriod, record.endPeriod, record.weeks), account)
+    // 没开自身提醒的课程会带着空撤销载荷回来，也必须先恢复所有学期的冲突快照。
+    reminderScheduler.updateCustomCourse(account, record)
+    reminderScheduler.restoreUndo(remindersJson)
+}
+
 @Composable
 fun ScheduleRoute(isActive: Boolean = true) {
     val context = LocalContext.current
@@ -535,9 +550,7 @@ fun ScheduleRoute(isActive: Boolean = true) {
                     if (System.currentTimeMillis() < undoDeadline) {
                         val record = deletedCourseJson?.let { ReminderJson.course(JSONObject(it)) }
                         if (record != null) {
-                            settingsManager.updateCustomCourse(ScheduleSettingsManager.CustomCourse(record.id.removePrefix("custom:"), record.name,
-                                record.location, record.teacher, record.day, record.startPeriod, record.endPeriod, record.weeks), routeAccountKey)
-                            reminderScheduler.restoreUndo(deletedRemindersJson)
+                            restoreDeletedCustomCourse(settingsManager, reminderScheduler, routeAccountKey, record, deletedRemindersJson)
                         }
                     }
                     deletedCourseJson = null
