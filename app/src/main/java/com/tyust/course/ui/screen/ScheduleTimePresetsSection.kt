@@ -19,6 +19,7 @@ import java.util.UUID
 @Composable
 internal fun ScheduleTimePresetsSection(
     store: ScheduleTimePresetStore, account: String, term: String, current: ScheduleTiming,
+    canApply: Boolean,
     onApply: (ScheduleTiming) -> Boolean
 ) {
     var revision by remember(account, term) { mutableIntStateOf(0) }
@@ -57,6 +58,7 @@ internal fun ScheduleTimePresetsSection(
                 onClick = { selected = preset })
         }
         if (undo != null) InsetGroupedRow(title = "撤回上次应用", subtitle = "恢复此学期应用前的作息",
+            enabled = canApply,
             onClick = { undoConfirmation = true })
         message?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.fillMaxWidth()) }
     }
@@ -72,7 +74,7 @@ internal fun ScheduleTimePresetsSection(
             Text("${preset.timing.count} 节 · 应用到 ${term.ifBlank { "学期尚未加载" }}")
             preset.timing.times.forEach { Text("第 ${it.period} 节  ${it.startTime}–${it.endTime}") }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SystemDialogButton(primary = true, enabled = term.isNotBlank(), onClick = { confirmation = preset; selected = null }) { Text("应用这套作息") }
+                SystemDialogButton(primary = true, enabled = canApply && term.isNotBlank(), onClick = { confirmation = preset; selected = null }) { Text("应用这套作息") }
                 SystemDialogButton(onClick = { editing = preset; selected = null }) { Text("编辑预设") }
                 SystemDialogButton(enabled = presets.size < ScheduleTimePresetStore.LIMIT,
                     onClick = { editing = draft(preset.name.take(28) + " 副本", preset.timing); selected = null }) { Text("复制预设") }
@@ -85,6 +87,7 @@ internal fun ScheduleTimePresetsSection(
             text = "$term · 每天 ${preset.timing.count} 节\n替换本学期节次时间，并将此账号每天节数设为 ${preset.timing.count}。开学日期和课程周次保持不变。课前提醒按新时间重排。超出节数的课程不会删除，但可能不显示在周课表。",
             confirmText = "确认应用", onDismiss = { confirmation = null }, onConfirm = {
                 action {
+                    check(canApply) { "学期尚未加载，请重新打开课表设置" }
                     if (current != preset.timing) {
                         check(store.apply(account, term, current, preset.timing, onApply)) {
                             "账号或学期已改变，请重新打开课表设置"
@@ -98,6 +101,7 @@ internal fun ScheduleTimePresetsSection(
         text = "恢复 $term 的上一套作息，并重新安排课前提醒。", confirmText = "恢复作息",
         onDismiss = { undoConfirmation = false }, onConfirm = {
             action {
+                check(canApply) { "学期尚未加载，请重新打开课表设置" }
                 check(store.undo(account, term, current) == undo) { "作息已改变，请重新打开设置" }
                 check(onApply(undo.previous)) { "账号或学期已改变，请重新打开课表设置" }
                 store.clearUndo(account, term); undoConfirmation = false; message = null

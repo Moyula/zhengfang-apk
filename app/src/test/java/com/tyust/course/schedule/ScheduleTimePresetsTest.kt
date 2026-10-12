@@ -99,6 +99,46 @@ class ScheduleTimePresetsTest {
         assertTrue(store.seed("a", empty).isEmpty())
     }
 
+    @Test fun validPresetRepairsInvalidOldClocksAndUndoPreservesTheirExactValuesAfterRestart() {
+        val invalidClocks = listOf("07:10" to "07:40", "08:00" to "07:40",
+            "" to "08:30", "not-a-time" to "08:30")
+        invalidClocks.forEach { (start, end) ->
+            val old = timing().copy(times = timing().times.map {
+                if (it.period == 2) it.copy(startTime = start, endTime = end) else it
+            })
+            assertNotNull(old.error())
+            assertNull(old.snapshotError())
+            val prefs = MemoryPreferences()
+            var active = old
+            assertTrue(ScheduleTimePresetStore(prefs).apply("a", "term", old, timing(30)) {
+                active = it; true
+            })
+            assertEquals(timing(30), active)
+            val restore = ScheduleTimePresetStore(prefs).undo("a", "term", active)!!.previous
+            assertEquals(old, restore)
+            assertEquals(old.times.associate { it.period to it.startTime }, restore.on(ScheduleTimeBase()).periodStarts)
+            assertTrue(ScheduleTimePresetStore(prefs).seed("a", old).isEmpty())
+        }
+    }
+
+    @Test fun invalidNewPresetAndMalformedSnapshotNeverReachTheApplyCallback() {
+        val store = ScheduleTimePresetStore(MemoryPreferences())
+        val invalid = timing().copy(times = timing().times.map {
+            if (it.period == 2) it.copy(startTime = "07:10") else it
+        })
+        var called = false
+        assertThrows(IllegalArgumentException::class.java) {
+            store.apply("a", "term", timing(), invalid) { called = true; true }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            store.apply("a", "term", timing().copy(times = timing().times.reversed()), timing(30)) {
+                called = true; true
+            }
+        }
+        assertFalse(called)
+        assertNull(store.undo("a", "term", timing(30)))
+    }
+
     @Test fun editingADraftDoesNotChangeTheActiveCalendarOrSavedPreset() {
         val store = ScheduleTimePresetStore(MemoryPreferences())
         store.save("a", preset())

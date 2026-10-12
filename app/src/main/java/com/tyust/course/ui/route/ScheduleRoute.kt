@@ -594,10 +594,10 @@ fun ScheduleRoute(isActive: Boolean = true) {
                         (!isDemoMode && session.token.accountStorageKey != routeAccountKey)) {
                         false
                     } else {
-                        reminderScheduler.updateTimeBase(routeAccountKey, settingsTerm,
-                            timing.on(reminderScheduler.timeBase(routeAccountKey, settingsTerm) ?: termTimeBase ?: ScheduleTimeBase()))
-                        settingsManager.periodCount = timing.count
-                        if (!isNextSemester && settingsTermOverride == null) settingsManager.savePeriodTimes(timing.times)
+                        com.tyust.course.schedule.applyScheduleTimingToTerm(settingsManager, timing,
+                            reminderScheduler.timeBase(routeAccountKey, settingsTerm) ?: termTimeBase ?: ScheduleTimeBase()) { calendar ->
+                            reminderScheduler.updateTimeBase(routeAccountKey, settingsTerm, calendar)
+                        }
                         com.tyust.course.schedule.ScheduleWidgetUpdater.update(context)
                         true
                     }

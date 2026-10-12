@@ -304,12 +304,9 @@ fun ScheduleSettingsScreen(
                         }
                     }
                     ScheduleTimePresetsSection(presetStore, presetAccountKey, reminderTerm,
-                        com.tyust.course.schedule.ScheduleTiming.from(periodCount, periodTimes)) { timing ->
-                        val applied = onApplyTimePreset?.invoke(timing) ?: run {
-                            manager.periodCount = timing.count
-                            if (onPeriodTimesChange != null) onPeriodTimesChange(timing.times) else manager.savePeriodTimes(timing.times)
-                            true
-                        }
+                        com.tyust.course.schedule.ScheduleTiming.from(periodCount, periodTimes),
+                        canApply = onApplyTimePreset != null) { timing ->
+                        val applied = onApplyTimePreset?.invoke(timing) ?: false
                         if (applied) { periodCount = timing.count; storedPeriodTimes = timing.times }
                         applied
                     }

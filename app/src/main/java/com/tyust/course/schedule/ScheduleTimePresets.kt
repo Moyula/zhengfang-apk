@@ -9,10 +9,16 @@ import java.util.UUID
 
 /** A reusable copy of timing settings; it never contains a semester date or courses. */
 data class ScheduleTiming(val count: Int, val times: List<PeriodTime>) {
-    fun error(requireComplete: Boolean = true): String? {
+    /** Old editor state is a restore snapshot, even if its clocks overlap or are malformed. */
+    fun snapshotError(): String? {
         if (count !in ScheduleSettingsManager.PERIOD_COUNT_MIN..ScheduleSettingsManager.PERIOD_COUNT_MAX)
             return "每天节数应为 8–16 节"
         if (times.map { it.period } != (1..count).toList()) return "请按顺序设置每一节课"
+        return null
+    }
+
+    fun error(requireComplete: Boolean = true): String? {
+        snapshotError()?.let { return it }
         var previousEnd = -1
         for (time in times) {
             if (!requireComplete && time.startTime.isBlank() && time.endTime.isBlank()) continue
@@ -49,6 +55,15 @@ data class ScheduleTiming(val count: Int, val times: List<PeriodTime>) {
             return value.substring(0, 2).toInt() * 60 + value.substring(3).toInt()
         }
     }
+}
+
+/** Apply and undo share this path; other semesters keep inheriting the unchanged legacy clocks. */
+internal fun applyScheduleTimingToTerm(settings: ScheduleSettingsManager, timing: ScheduleTiming,
+    base: ScheduleTimeBase, writeCalendar: (ScheduleTimeBase) -> Unit) {
+    require(timing.snapshotError() == null) { timing.snapshotError().orEmpty() }
+    writeCalendar(timing.on(base))
+    // Count already is account-wide in the app. Do not also overwrite account-wide period times.
+    settings.periodCount = timing.count
 }
 
 data class ScheduleTimePreset(val id: String, val name: String, val timing: ScheduleTiming)
@@ -127,7 +142,8 @@ class ScheduleTimePresetStore(private val preferences: SharedPreferences) {
 
     fun rememberApply(account: String, term: String, previous: ScheduleTiming, applied: ScheduleTiming) {
         require(account.isNotBlank() && term.isNotBlank())
-        require(previous.error(false) == null && applied.error() == null)
+        require(previous.snapshotError() == null) { previous.snapshotError().orEmpty() }
+        require(applied.error() == null) { applied.error().orEmpty() }
         check(preferences.edit().putString(undoKey(account, term), JSONObject()
             .put("previous", encode(previous)).put("applied", encode(applied)).toString()).commit())
     }
@@ -138,7 +154,7 @@ class ScheduleTimePresetStore(private val preferences: SharedPreferences) {
         return preferences.getString(undoKey(account, term), null)?.let { raw -> runCatching {
             val json = JSONObject(raw)
             ScheduleTimingUndo(decode(json.getJSONObject("previous")), decode(json.getJSONObject("applied")))
-                .takeIf { it.applied == current && it.previous.error(false) == null }
+                .takeIf { it.applied == current && it.applied.error() == null && it.previous.snapshotError() == null }
         }.getOrNull() }
     }
 
