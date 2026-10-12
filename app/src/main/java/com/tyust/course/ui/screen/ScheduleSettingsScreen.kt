@@ -99,6 +99,8 @@ fun ScheduleSettingsScreen(
     onWeekStartChange: ((com.tyust.course.schedule.ScheduleWeekStart) -> Unit)? = null,
     onPeriodTimesChange: ((List<PeriodTime>) -> Unit)? = null,
     periodTimesOverride: List<PeriodTime>? = null,
+    presetAccountKey: String = com.tyust.course.manager.UserManager.getInstance().currentAccountStorageKey.ifBlank { "default" },
+    onApplyTimePreset: ((com.tyust.course.schedule.ScheduleTiming) -> Boolean)? = null,
     customCourses: List<ScheduleSettingsManager.CustomCourse> = emptyList(),
     onAddCustomCourse: (() -> Unit)? = null,
     onEditCustomCourse: (String) -> Unit = {},
@@ -115,6 +117,8 @@ fun ScheduleSettingsScreen(
     onStudyBlockChange: ((com.tyust.course.schedule.ScheduleStudyBlock) -> Unit)? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val presetStore = remember(context) { com.tyust.course.schedule.ScheduleTimePresetStore(
+        context.getSharedPreferences("schedule_time_presets", android.content.Context.MODE_PRIVATE)) }
     var periodCount by remember { mutableStateOf(manager.periodCount) }
     LaunchedEffect(manager.revision) { periodCount = manager.periodCount }
     var storedPeriodTimes by remember { mutableStateOf(periodTimesOverride ?: manager.getPeriodTimes()) }
@@ -137,7 +141,9 @@ fun ScheduleSettingsScreen(
     LaunchedEffect(manager.semesterStartDate, semesterStartOverride) {
         semesterStartDate = semesterStartOverride ?: manager.semesterStartDate
     }
-    LaunchedEffect(periodTimesOverride) { periodTimesOverride?.let { storedPeriodTimes = it } }
+    LaunchedEffect(manager.revision, periodTimesOverride, presetAccountKey) {
+        storedPeriodTimes = periodTimesOverride ?: manager.getPeriodTimes(presetAccountKey)
+    }
 
     // getPeriodTimes() 返回存档或 12 条默认值，与 periodCount 无关——所以选了
     // 16 节之后列表仍然只有 12 行，而课表已经画 16 行。这里按 periodCount 裁剪/补齐。
@@ -296,6 +302,16 @@ fun ScheduleSettingsScreen(
                                     onClick = { onEditCustomCourse(course.id) })
                             }
                         }
+                    }
+                    ScheduleTimePresetsSection(presetStore, presetAccountKey, reminderTerm,
+                        com.tyust.course.schedule.ScheduleTiming.from(periodCount, periodTimes)) { timing ->
+                        val applied = onApplyTimePreset?.invoke(timing) ?: run {
+                            manager.periodCount = timing.count
+                            if (onPeriodTimesChange != null) onPeriodTimesChange(timing.times) else manager.savePeriodTimes(timing.times)
+                            true
+                        }
+                        if (applied) { periodCount = timing.count; storedPeriodTimes = timing.times }
+                        applied
                     }
                     StaggerIn(index = 0, settled = entranceSettled) {
                         InsetGroupedSection(header = "基础设置") {
