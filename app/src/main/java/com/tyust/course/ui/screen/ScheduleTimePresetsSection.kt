@@ -35,7 +35,10 @@ internal fun ScheduleTimePresetsSection(
     }
     val undo = remember(account, term, current, revision) { store.undo(account, term, current) }
     fun action(block: () -> Unit) {
-        runCatching(block).onFailure { message = it.message ?: "操作未完成，请重试" }
+        runCatching(block).onFailure {
+            message = it.message ?: "操作未完成，请重试"
+            confirmation = null; undoConfirmation = false; deleteConfirmation = null
+        }
         revision++
     }
     fun draft(name: String, timing: ScheduleTiming) = ScheduleTimePreset(UUID.randomUUID().toString(), name, timing)
@@ -44,8 +47,10 @@ internal fun ScheduleTimePresetsSection(
         InsetGroupedRow(title = "当前作息", subtitle =
             (presets.firstOrNull { it.timing == current }?.name ?: "自定义作息") + " · ${current.count} 节")
         InsetGroupedRow(title = "保存当前作息", subtitle = "复制为预设，之后可以编辑或切换",
+            enabled = presets.size < ScheduleTimePresetStore.LIMIT,
             onClick = { editing = draft("", current) })
         InsetGroupedRow(title = "新建作息", subtitle = "最多保存 ${ScheduleTimePresetStore.LIMIT} 套，只保存在当前账号",
+            enabled = presets.size < ScheduleTimePresetStore.LIMIT,
             onClick = { editing = draft("", ScheduleTiming.from(current.count, emptyList())) })
         presets.forEach { preset ->
             InsetGroupedRow(title = preset.name, subtitle = "${preset.timing.count} 节 · 查看、编辑或应用",
@@ -57,7 +62,8 @@ internal fun ScheduleTimePresetsSection(
     }
     editing?.let { draft ->
         ScheduleTimePresetEditor(draft, onDismiss = { editing = null }, onSave = { preset ->
-            action { store.save(account, preset); editing = null; message = null }
+            store.save(account, preset)
+            revision++; editing = null; message = null
         })
     }
     selected?.let { preset ->
@@ -68,7 +74,8 @@ internal fun ScheduleTimePresetsSection(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SystemDialogButton(primary = true, enabled = term.isNotBlank(), onClick = { confirmation = preset; selected = null }) { Text("应用这套作息") }
                 SystemDialogButton(onClick = { editing = preset; selected = null }) { Text("编辑预设") }
-                SystemDialogButton(onClick = { editing = draft(preset.name.take(28) + " 副本", preset.timing); selected = null }) { Text("复制预设") }
+                SystemDialogButton(enabled = presets.size < ScheduleTimePresetStore.LIMIT,
+                    onClick = { editing = draft(preset.name.take(28) + " 副本", preset.timing); selected = null }) { Text("复制预设") }
                 SystemDialogButton(destructive = true, onClick = { deleteConfirmation = preset; selected = null }) { Text("删除预设") }
             }
         }
@@ -109,10 +116,15 @@ private fun ScheduleTimePresetEditor(initial: ScheduleTimePreset, onDismiss: () 
     var timing by remember(initial.id) { mutableStateOf(initial.timing) }
     var editingPeriod by remember { mutableStateOf<PeriodTime?>(null) }
     var showCount by remember { mutableStateOf(false) }
+    var saveError by remember(initial.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(name, timing) { saveError = null }
     val error = timing.error() ?: if (name.trim().isBlank()) "请填写预设名称" else null
     SystemDialog(onDismissRequest = onDismiss, scrollContent = true, title = { Text("编辑作息预设") },
         confirmButton = { SystemDialogButton(primary = true, enabled = error == null,
-            onClick = { onSave(initial.copy(name = name.trim(), timing = timing)) }) { Text("保存预设") } },
+            onClick = {
+                runCatching { onSave(initial.copy(name = name.trim(), timing = timing)) }
+                    .onFailure { saveError = it.message ?: "作息未保存，请重试" }
+            }) { Text("保存预设") } },
         dismissButton = { SystemDialogButton(onClick = onDismiss) { Text("取消") } }) {
         Text("保存只更新预设。需要切换课表时，请另行选择应用。")
         GlassFormField(name, { name = it.take(ScheduleTimePresetStore.NAME_LIMIT) }, "预设名称", placeholder = "例如：夏季作息")
@@ -123,6 +135,7 @@ private fun ScheduleTimePresetEditor(initial: ScheduleTimePreset, onDismiss: () 
                 onClick = { editingPeriod = time })
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
     if (showCount) GlassOptionWheelDialog(title = "每天节数",
         options = (ScheduleSettingsManager.PERIOD_COUNT_MIN..ScheduleSettingsManager.PERIOD_COUNT_MAX).map { "$it 节" },
