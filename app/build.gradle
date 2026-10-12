@@ -198,6 +198,8 @@ dependencies {
     // The default 13.x artifact is Vulkan-only; MuMu Android 12 cannot create its surface.
     implementation 'org.maplibre.gl:android-sdk-opengl:13.6.1'
     implementation 'com.amap.api:3dmap-location-search:11.3.100_loc11.3.000_sea9.8.1'
+    // AMap's JAR references FastMath but its published POM omits this dependency.
+    implementation 'net.jafama:jafama:2.3.2'
     implementation 'androidx.activity:activity-compose:1.10.1'
     implementation 'androidx.core:core-splashscreen:1.2.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.9.1'

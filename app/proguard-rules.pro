@@ -10,3 +10,8 @@
 -keep class com.amap.api.** { *; }
 -keep class com.autonavi.** { *; }
 -keep class com.loc.** { *; }
+
+# The optional soft-RTK positioning extension is absent from AMap's base JAR.
+# We only display the map; positioning uses Android, and SDK location is disabled.
+# Keep this exception exact so other missing runtime dependencies still fail R8.
+-dontwarn com.amap.ams.gnss.GnssSoftLocator
