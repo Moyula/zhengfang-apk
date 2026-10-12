@@ -353,6 +353,7 @@ fun SettingsRoute(
         academicSystemName = com.tyust.course.academic.AcademicCapabilities.name(UserManager.getInstance().currentSchool?.academicSystem),
         onAcademicSupport = { showAcademicSupport = true },
         onAcademicPlugins = { context.startActivity(Intent(context, com.tyust.course.academic.plugin.PluginCenterActivity::class.java)) },
+        onMapServices = { context.startActivity(Intent(context, com.tyust.course.academic.plugin.PluginMapSettingsActivity::class.java)) },
         onCampusServices = { context.startActivity(Intent(context, com.tyust.course.academic.plugin.CampusServiceCenterActivity::class.java)) },
         onQuickFeedback = { com.tyust.course.academic.plugin.PluginFeedback.open(context) }
     )

@@ -37,6 +37,7 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.ManageAccounts
+import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.School
@@ -112,6 +113,7 @@ fun SettingsScreen(
     onAcademicSupport: () -> Unit = {},
     onAcademicPlugins: () -> Unit = {},
     onCampusServices: () -> Unit = {},
+    onMapServices: () -> Unit = {},
     onQuickFeedback: () -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
@@ -258,6 +260,8 @@ fun SettingsScreen(
             }
 
             InsetGroupedSection(Modifier.moduleEntrance(3), header = "应用与支持") {
+                SettingsRow(icon = Icons.Outlined.Map, iconTint = MaterialTheme.colorScheme.primary,
+                    title = "地图服务", subtitle = "个人高德 Key、搜索额度与公共服务", onClick = onMapServices)
                 InsetGroupedRow(
                     icon = Icons.Outlined.Campaign,
                     iconTint = MaterialTheme.colorScheme.primary,

@@ -30,9 +30,22 @@ class PluginMapRequestAuthTest {
             "http://plugins.hidisiwa.xyz/api/maps/v1/search?q=place", "https://plugins.hidisiwa.xyz/api/maps/v1/client-config",
             "https://plugins.hidisiwa.xyz/api/maps/v1/search?q=one&q=two", "https://plugins.hidisiwa.xyz/api/maps/v1/search?q=place&key=extra")) {
             val builder = Request.Builder().url(target).header(PluginMapRequestAuth.HEADER, "plugin-supplied-proof")
+                .header(PluginPersonalMapStore.HEADER, "plugin-supplied-personal-code")
             assertFalse(PluginMapRequestAuth.accepts(builder.build()))
             assertNull(PluginMapRequestAuth.authorize(builder, context = null).build().header(PluginMapRequestAuth.HEADER))
+            assertNull(builder.build().header(PluginPersonalMapStore.HEADER))
         }
         assertFalse(PluginMapRequestAuth.accepts(Request.Builder().url("https://plugins.hidisiwa.xyz/api/maps/v1/search?q=place").head().build()))
+    }
+
+    @Test fun personalProofMatchesNodeAndBindsTheConnectionWithoutEmbeddingItsCode() {
+        val token = "zfmap1_" + "A".repeat(43)
+        val encoded = PluginMapRequestAuth.signedHeader("synthetic-map-client-credential-0123456789", "com.tyust.course", 120,
+            "1755ba0b0efa6e20c1c96cf9b216569851b6d399225044da05d20c547f71d671", "Place One",
+            1791810000L, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", token)
+        val json = JSONObject(String(Base64.decode(encoded, Base64.URL_SAFE), Charsets.UTF_8))
+        assertEquals("4a7fb8ee201a018e2a7630bc30f1dbb646889d054b199b4d9b56713df221c6d3", json.getString("personalHash"))
+        assertEquals("48NQ0ORXclKdSM9MVQ0pZvihFY8m1kP801KhhXpuGrU", json.getString("signature"))
+        assertFalse(json.toString().contains(token))
     }
 }
