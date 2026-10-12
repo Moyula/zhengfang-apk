@@ -10,6 +10,9 @@ import android.os.Parcel
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SdkSuppress
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -22,6 +25,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Uses a synthetic profile and the real, separate Gecko service; never reads plugin accounts. */
 @RunWith(AndroidJUnit4::class)
@@ -33,16 +37,16 @@ class PluginEmbeddedBrowserDeviceTest {
     @Test fun restoredExtensionConnectsBeforeOpeningAnyCourseAndKeepsCookies() {
         val profile = profile()
         try {
-            repeat(2) { pass ->
+            repeat(3) { pass ->
                 Client(profile).use { client ->
                     client.configure()
                     // Let last-window and restored-extension disconnect callbacks settle.
                     Thread.sleep(1200)
                     val before = client.call("cookies.read", JSONObject().put("url", "https://example.com/"))
-                    assertEquals(if (pass == 0) "" else "browser_fixture=retained", before.getString("header"))
+                    assertEquals("Persistent cookie on process start $pass", if (pass == 0) "" else "browser_fixture=retained", before.getString("header"))
                     client.call("cookies.write", JSONObject().put("url", "https://example.com/")
                         .put("cookie", "browser_fixture=retained; Path=/; Secure; Max-Age=3600"))
-                    assertEquals("browser_fixture=retained", client.call("cookies.read",
+                    assertEquals("Cookie immediately after writing on pass $pass", "browser_fixture=retained", client.call("cookies.read",
                         JSONObject().put("url", "https://example.com/")).getString("header"))
                 }
             }
@@ -282,6 +286,91 @@ class PluginEmbeddedBrowserDeviceTest {
                 client.call("script.stop")
             }
         } finally { File(context.noBackupFilesDir, "embedded-browser/$profile").deleteRecursively() }
+    }
+
+    @Test fun backgroundTimersAndRequestsContinueAfterTheBrowserIsMinimized() {
+        backgroundTimersAndRequestsContinue(minimizeBrowser = true)
+    }
+
+    @Test fun backgroundTimersAndRequestsContinueAfterHomeAndStopWhenRequested() {
+        backgroundTimersAndRequestsContinue(minimizeBrowser = false)
+    }
+
+    private fun backgroundTimersAndRequestsContinue(minimizeBrowser: Boolean) {
+        assumeTrue("Opt in to the public test document with -e allowBrowserNetwork true",
+            InstrumentationRegistry.getArguments().getString("allowBrowserNetwork") == "true")
+        val profile = profile()
+        val handle = "background-fixture"
+        val replies = AtomicReference(CountDownLatch(3))
+        val received = AtomicInteger()
+        val failures = AtomicInteger()
+        val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+        try {
+            Client(profile) { event ->
+                when (event.optString("kind")) {
+                    "request" -> JSONObject().put("ok", true).put("response", JSONObject()
+                        .put("status", 200).put("url", "https://example.com/background-fixture")
+                        .put("headers", JSONObject()).put("body", "fixture-ok"))
+                    "storage" -> {
+                        if (event.optString("key") == "background-tick") {
+                            if (event.optBoolean("value")) {
+                                received.incrementAndGet()
+                                replies.get().countDown()
+                            } else failures.incrementAndGet()
+                        }
+                        JSONObject().put("ok", true)
+                    }
+                    else -> JSONObject().put("ok", true)
+                }
+            }.use { client ->
+                client.configure()
+                val declaration = JSONObject("""{
+                    "matches":[{"host":"example.com","pathPrefix":"/"}],"exclude":[],
+                    "adapter":{"version":"fixture","settings":[],"startSelector":"#fixture-start",
+                    "runningSelector":"#fixture-running","logSelector":"#fixture-log"}
+                }""")
+                client.call("script.start", JSONObject().put("handle", handle).put("source", """
+                    setInterval(() => GM_xmlhttpRequest({url:'https://example.com/background-fixture',
+                      onload(r){GM_setValue('background-tick',r.status===200&&r.responseText==='fixture-ok');},
+                      onerror(){GM_setValue('background-tick',false);}}), 1000);
+                """.trimIndent()).put("declaration", declaration).put("info", JSONObject().put("version", "1.0.0"))
+                    .put("values", JSONObject()).put("runAt", "document-end"))
+                val page = client.call("page.open", JSONObject().put("url", "https://example.com/")
+                    .put("origins", JSONArray().put("https://example.com")).put("scriptHandle", handle).put("active", true))
+                context.startActivity(Intent(context, PluginEmbeddedBrowserActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("handle", page.getString("handle")))
+                assertNotNull("Browser activity did not appear", device.wait(Until.findObject(By.text("收起")), 10_000))
+                PluginForegroundWork.add(context, handle, PluginForegroundWork.Entry("synthetic.background", "后台运行测试") {})
+                assertTrue("The script never started its timers", replies.get().await(25, TimeUnit.SECONDS))
+                if (minimizeBrowser) device.findObject(By.text("收起")).click()
+                device.pressHome()
+                val expected = if (minimizeBrowser) 8 else 35
+                val backgroundReplies = CountDownLatch(expected)
+                replies.set(backgroundReplies)
+                val continued = backgroundReplies.await(55, TimeUnit.SECONDS)
+                assertTrue("Timers or GM replies stopped in the background: received=${expected-backgroundReplies.count}, failures=${failures.get()}", continued)
+                assertEquals("Background requests failed", 0, failures.get())
+                assertEquals(page.getString("handle"), client.call("page.status", JSONObject()
+                    .put("handle", page.getString("handle"))).getString("handle"))
+                context.startActivity(Intent(context, PluginEmbeddedBrowserActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("handle", page.getString("handle")))
+                assertNotNull("Browser activity did not reopen", device.wait(Until.findObject(By.text("收起")), 10_000))
+                val resumedReplies = CountDownLatch(3)
+                replies.set(resumedReplies)
+                assertTrue("The script stopped when its browser reopened", resumedReplies.await(10, TimeUnit.SECONDS))
+                client.call("script.stop")
+                assertThrows(PluginException::class.java) {
+                    client.call("page.status", JSONObject().put("handle", page.getString("handle")))
+                }
+                Thread.sleep(1200) // Drain a reply already in flight when stop was requested.
+                val stoppedAt = received.get()
+                Thread.sleep(2500)
+                assertEquals("The stopped script kept making requests", stoppedAt, received.get())
+            }
+        } finally {
+            PluginForegroundWork.remove(context, handle)
+            File(context.noBackupFilesDir, "embedded-browser/$profile").deleteRecursively()
+        }
     }
 
     private inner class Client(

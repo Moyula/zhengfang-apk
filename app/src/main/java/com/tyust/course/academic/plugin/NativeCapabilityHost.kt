@@ -174,7 +174,7 @@ class NativeCapabilityHost internal constructor(
                 "records.upsert" -> withContext(Dispatchers.IO) { records.upsert(input) }
                 "records.query" -> withContext(Dispatchers.IO) { records.query(input) }
                 "userscript.status" -> PluginUserscripts.status(app, pkg, session, input.getString("scriptId"))
-                "userscript.configure" -> PluginUserscripts.configure(app, pkg, session, input)
+                "userscript.configure" -> PluginUserscripts.configure(app, pkg, session, input, vault)
                 "userscript.update" -> {
                     val status = PluginUserscripts.status(app, pkg, session, input.getString("scriptId"))
                     if (!status.optBoolean("subscribed")) confirm(flow, "订阅原脚本", "原脚本从插件声明的官方来源下载，保留作者和许可信息。启用后自动检查更新，新版将在下次任务运行。")
@@ -187,7 +187,7 @@ class NativeCapabilityHost internal constructor(
                     PluginUserscripts.start(app, pkg, session, input.getString("scriptId"), input.getString("url"))
                 }
                 "userscript.control" -> PluginUserscripts.control(app, pkg, session, input)
-                "userscript.interact", "userscript.action" -> PluginEmbeddedBrowser.interactScript(app, pkg, session, input, name == "userscript.action")
+                "userscript.interact", "userscript.action" -> PluginEmbeddedBrowser.interactScript(app, pkg, session, input, name == "userscript.action", vault)
                 "browser.session.open" -> PluginEmbeddedBrowser.openUrl(app, pkg, session, input)
                 "browser.session.status", "browser.session.close" -> PluginEmbeddedBrowser.pageControl(app, pkg, session, input.getString("handle"), name.endsWith("close"))
                 "tasks.foreground.start" -> {

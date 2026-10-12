@@ -89,7 +89,9 @@ import com.tyust.course.ui.theme.SemanticWarning
 fun SettingsRoute(
     onAccountChanged: () -> Unit = {},
     onSurveyCenter: () -> Unit = {},
-    surveyUnreadCount: Int = 0
+    surveyUnreadCount: Int = 0,
+    onAnnouncementCenter: () -> Unit = {},
+    announcementUnreadCount: Int = 0
 ) {
     val context = LocalContext.current
     val isDemoMode = remember { UserManager.getInstance().isDemoMode }
@@ -330,6 +332,8 @@ fun SettingsRoute(
         },
         onSurveyCenter = onSurveyCenter,
         surveyUnreadCount = surveyUnreadCount,
+        onAnnouncementCenter = onAnnouncementCenter,
+        announcementUnreadCount = announcementUnreadCount,
         onWallpaperSelect = { showWallpaperDialog = true },
         wallpaperName = currentWallpaperName,
         themeName = AppearanceSettingsManager.themeMode.label,

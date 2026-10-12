@@ -263,6 +263,8 @@ dependencies {
     // Markdown Rendering for Compose
     implementation "com.halilibo.compose-richtext:richtext-commonmark:0.17.0"
     implementation "com.halilibo.compose-richtext:richtext-ui-material3:0.17.0"
+    // Match the renderer's parser when inspecting Markdown before displaying it.
+    implementation 'org.commonmark:commonmark:0.21.0'
 
     // Liquid Glass (Kyant Backdrop) — iOS 26 风格折射 / 色散
     implementation 'io.github.kyant0:backdrop:2.0.0'

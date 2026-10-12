@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.AssignmentInd
 import androidx.compose.material.icons.outlined.Assignment
+import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ContentPasteSearch
 import androidx.compose.material.icons.automirrored.outlined.Login
@@ -89,6 +90,8 @@ fun SettingsScreen(
     onSchoolAdaptation: () -> Unit = {},
     onSurveyCenter: () -> Unit = {},
     surveyUnreadCount: Int = 0,
+    onAnnouncementCenter: () -> Unit = {},
+    announcementUnreadCount: Int = 0,
     onWallpaperSelect: () -> Unit = {},
     wallpaperName: String = "",
     themeName: String = "跟随系统",
@@ -255,6 +258,19 @@ fun SettingsScreen(
             }
 
             InsetGroupedSection(Modifier.moduleEntrance(3), header = "应用与支持") {
+                InsetGroupedRow(
+                    icon = Icons.Outlined.Campaign,
+                    iconTint = MaterialTheme.colorScheme.primary,
+                    title = "公告中心",
+                    subtitle = if (announcementUnreadCount > 0) "有 $announcementUnreadCount 条未读公告" else "查看功能动态与使用提醒",
+                    onClick = onAnnouncementCenter,
+                    trailing = {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            if (announcementUnreadCount > 0) Box(Modifier.size(8.dp).background(SemanticDanger, CircleShape))
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                )
                 InsetGroupedRow(
                     icon = Icons.Outlined.Assignment,
                     iconTint = MaterialTheme.colorScheme.primary,

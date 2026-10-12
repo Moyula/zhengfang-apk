@@ -268,7 +268,7 @@ internal object PluginEmbeddedBrowser {
         }
         return live.describe(live.store.publicStatus())
     }
-    suspend fun interactScript(app: Context, pkg: PluginPackage, owner: AcademicSession, input: JSONObject, command: Boolean): JSONObject = withContext(Dispatchers.Main) {
+    suspend fun interactScript(app: Context, pkg: PluginPackage, owner: AcademicSession, input: JSONObject, command: Boolean, credentialVault: NativePluginVault): JSONObject = withContext(Dispatchers.Main) {
         val c = connection?.takeIf { it.valid() && it.namespace == PluginStorageScope.session(owner, pkg.manifest.id, !pkg.official) }
             ?: throw PluginException(PluginErrorCode.NOT_OPEN, "任务已停止，请重新开始")
         val live = c.script?.takeIf { !it.closed && it.handle == input.getString("handle") }
@@ -282,9 +282,7 @@ internal object PluginEmbeddedBrowser {
             val request = JSONObject().put("handle", live.handle).put("interactionId", id).put("actionId", action)
             if (prompt.optString("kind") == "input" && action == "confirm") {
                 val credential = input.optJSONObject("credential") ?: throw PluginException(PluginErrorCode.VALIDATION_FAILED, "请填写提示所需内容")
-                val value = withContext(Dispatchers.IO) { live.vault.get("credential:" + credential.getString("handle"))?.optString(credential.getString("field")) }
-                    ?: throw PluginException(PluginErrorCode.STALE_CONTEXT, "输入凭据已失效")
-                if (value.length > 4096) throw PluginException(PluginErrorCode.VALIDATION_FAILED, "输入内容过长")
+                val value = withContext(Dispatchers.IO) { credentialVault.credentialField(credential) }
                 request.put("text", value)
             } else if (input.has("credential")) throw PluginException(PluginErrorCode.PERMISSION_DENIED, "此提示不接收输入")
             val result = rpc(c, "script.interact", request)
