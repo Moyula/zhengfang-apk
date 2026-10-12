@@ -13,9 +13,10 @@ import java.util.concurrent.TimeUnit
 
 internal object PluginLocationSearch {
     class Failure(message: String) : java.io.IOException(message)
-    data class Place(val name: String, val point: PluginCoordinates.Point, val title: String, val address: String)
+    data class Place(val name: String, val point: PluginCoordinates.Point, val title: String, val address: String, val exact: Boolean = true)
     val USER_AGENT = "ZhengfangCourse/${com.tyust.course.BuildConfig.VERSION_NAME} (https://github.com/znjhahaha/zhengfang-apk)"
-    private val client = OkHttpClient.Builder().callTimeout(15, TimeUnit.SECONDS).build()
+    private val client = OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS)
+        .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).build()
     private val mutex = Mutex()
     private var requestedAt = 0L
     private val cache = linkedMapOf<String, List<Place>>()
@@ -29,10 +30,14 @@ internal object PluginLocationSearch {
         if (wait > 0) delay(wait)
         requestedAt = android.os.SystemClock.elapsedRealtime()
         val found = withContext(Dispatchers.IO) {
-            client.newCall(Request.Builder().url(searchUrl(text)).header("User-Agent", USER_AGENT).build()).execute().use { response ->
-                if (!response.isSuccessful) throw Failure(PluginMapService.searchFailure(response.code))
+            val request = PluginMapRequestAuth.authorize(Request.Builder().url(searchUrl(text)).header("User-Agent", USER_AGENT)).build()
+            client.newCall(request).execute().use { response ->
                 val raw = response.body?.byteStream()?.use { String(it.readBytesBounded(128 * 1024), Charsets.UTF_8) }
                     ?: throw Failure("地址搜索未返回结果，请稍后重试")
+                if (!response.isSuccessful) {
+                    val message = runCatching { org.json.JSONObject(raw).optString("error") }.getOrDefault("")
+                    throw Failure(if (message.startsWith("国内搜索免费额度")) "国内搜索免费额度已用完或尚未启用，可用地图选点或坐标" else PluginMapService.searchFailure(response.code))
+                }
                 parseResults(raw)
             }
         }
