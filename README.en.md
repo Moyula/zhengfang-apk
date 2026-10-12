@@ -146,6 +146,12 @@ This repository contains the plugin runtime and protocol files used by the app. 
 
 Contributions of school adapters and campus services are welcome. **Developer QQ group: 1074017033**. The [developer center](https://plugins.hidisiwa.xyz/developers) provides the SDK, templates, API documentation, and submission entry point. SDK **3.6.0** retains API major version **3**. The website guides authors through **Develop → Validate and package → Submit an update**. Platform sources are maintained in a separate repository; public documentation, reusable agent prompts, and both developer kits are available through the developer center. The [developer wiki](https://plugins.hidisiwa.xyz/wiki/) includes full tutorials and examples of correct and incorrect usage. This repository includes the app runtime and generated contract resources.
 
+## Timetable presets
+
+In schedule settings, save the current timetable or create, copy and edit named presets such as summer and winter hours. Each account can save up to 12 local presets, with 8–16 periods per day. Saving a preset does not change the schedule: preview it and choose **Apply** to switch.
+
+Applying replaces the selected term's period times and updates the existing account-wide period count. The term start date, first weekday, courses and adjustments are retained; reminders are rescheduled and widgets are refreshed. You can undo the latest application while its timings remain unchanged. Presets stay on the device, and seasonal switching is manual.
+
 ## Set reminders for a whole term
 
 In the timetable's **Class reminders** settings, enable or disable reminders for the current account's entire selected term, including custom courses. Existing lead times are preserved; newly enabled reminders default to 15 minutes before class. Courses added afterward start with reminders disabled and can be configured individually.
