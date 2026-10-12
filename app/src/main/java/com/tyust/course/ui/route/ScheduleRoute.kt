@@ -211,9 +211,8 @@ fun ScheduleRoute(isActive: Boolean = true) {
     val displayedTimeBase = remember(resolvedTermId, remindersRevision, customRevision, actualTermId) {
         scheduleRepository.timeBase(routeAccountKey, resolvedTermId, actualTermId)
     }
-    fun periodTimesFor(base: ScheduleTimeBase?): List<ScheduleSettingsManager.PeriodTime> = settingsManager.getPeriodTimes().map {
-        it.copy(startTime = base?.periodStarts?.get(it.period) ?: it.startTime, endTime = base?.periodEnds?.get(it.period) ?: it.endTime)
-    }
+    fun periodTimesFor(base: ScheduleTimeBase?): List<ScheduleSettingsManager.PeriodTime> =
+        com.tyust.course.schedule.ScheduleTiming.mergePeriodTimes(base, settingsManager.getPeriodTimes(routeAccountKey))
     val focusRegistry = remember { com.tyust.course.ui.screen.ScheduleFocusRegistry() }
     val reminderRequest = CourseReminderNavigation.requestedId
     LaunchedEffect(reminderRequest) {
@@ -588,6 +587,21 @@ fun ScheduleRoute(isActive: Boolean = true) {
                 displayPreferences = displayPreferences,
                 onDisplayPreferences = { displayPreferences = it; displayStore.write(routeAccountKey, it) },
                 periodTimesOverride = periodTimesFor(termTimeBase),
+                presetAccountKey = routeAccountKey,
+                onApplyTimePreset = { timing ->
+                    if (settingsTerm.isBlank() || routeAccountKey.isBlank() ||
+                        UserManager.getInstance().currentAccountStorageKey != routeAccountKey ||
+                        (!isDemoMode && session.token.accountStorageKey != routeAccountKey)) {
+                        false
+                    } else {
+                        com.tyust.course.schedule.applyScheduleTimingToTerm(settingsManager, timing,
+                            reminderScheduler.timeBase(routeAccountKey, settingsTerm) ?: termTimeBase ?: ScheduleTimeBase()) { calendar ->
+                            reminderScheduler.updateTimeBase(routeAccountKey, settingsTerm, calendar)
+                        }
+                        com.tyust.course.schedule.ScheduleWidgetUpdater.update(context)
+                        true
+                    }
+                },
                 semesterStartOverride = termTimeBase?.firstWeekDate?.takeIf { it.isNotBlank() }?.let {
                     runCatching { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).parse(it)?.time }.getOrNull()
                 } ?: 0L,
