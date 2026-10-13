@@ -4,7 +4,6 @@ import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import okhttp3.*
-import java.net.Inet6Address
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.io.IOException
@@ -12,23 +11,23 @@ import java.util.concurrent.TimeUnit
 
 /** Connections only: no credentials, cookies or permission decisions are cached. */
 internal object PluginHttpClients {
-    /** 教育网 IPv6 在公网流量下常不可达；retryOnConnectionFailure(false) 不会尝试下一个地址，IPv4 必须排前。 */
-    private val preferIpv4 = Dns { hostname -> Dns.SYSTEM.lookup(hostname).sortedBy { if (it is Inet6Address) 1 else 0 } }
     private val clients = LinkedHashMap<String, OkHttpClient>(16, .75f, true)
     @Synchronized fun client(operation: PluginOperation, url: HttpUrl, cookies: CookieJar): OkHttpClient {
         val key = listOf(operation.manifest.id, operation.packageDigest, operation.session.instanceId,
             operation.epoch.toString(), PluginAuthScope.origin(url)).joinToString("\u0000")
         val base = clients.getOrPut(key) {
             OkHttpClient.Builder().connectionPool(ConnectionPool(3, 30, TimeUnit.SECONDS))
-                .dns(preferIpv4)
                 .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
                 .connectTimeout(20, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).callTimeout(45, TimeUnit.SECONDS).build()
         }
         while (clients.size > 16) {
             val oldest = clients.entries.iterator(); val entry = oldest.next(); oldest.remove(); entry.value.connectionPool.evictAll()
         }
-        return base.newBuilder().cookieJar(cookies).eventListener(Trace(operation)).build()
+        return base.newBuilder().cookieJar(cookies).build()
     }
+
+    fun call(operation: PluginOperation, url: HttpUrl, cookies: CookieJar, request: Request): Call =
+        PluginConnectFallbackCall(client(operation, url, cookies), Trace(operation), request, PluginConnectFallback.MAX_ATTEMPTS)
     @Synchronized fun clearPlugin(id: String) {
         val iterator = clients.entries.iterator()
         while (iterator.hasNext()) { val entry = iterator.next(); if (entry.key.startsWith(id + "\u0000")) { entry.value.connectionPool.evictAll(); iterator.remove() } }
