@@ -2,7 +2,7 @@ package com.tyust.course.academic.plugin
 
 import android.content.Context
 import android.util.AtomicFile
-import com.dokar.quickjs.QuickJs
+import com.tyust.course.academic.plugin.runtime.PluginQuickJs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -111,12 +111,11 @@ internal class PluginUserscriptStore(app: Context, val policy: PluginUserscriptP
                 val parsed = UserscriptMetadata.validate(source, policy)
                 if (parsed.version != remote.version) throw PluginException(PluginErrorCode.VALIDATION_FAILED, "更新元信息与脚本版本不一致")
                 if (syntaxOverride != null) syntaxOverride.invoke(source) else {
-                    val engine = QuickJs.create(Dispatchers.IO)
-                    try {
+                    PluginQuickJs.withEngine { engine ->
                         engine.memoryLimit = 16L * 1024 * 1024
                         engine.evaluationTimeoutMillis = 5000
                         engine.evaluate<Unit>("void new Function(" + JSONObject.quote(source) + ");")
-                    } finally { engine.close() }
+                    }
                 }
                 currentCoroutineContext().ensureActive()
                 val digest = PluginJson.sha256(source.toByteArray())
