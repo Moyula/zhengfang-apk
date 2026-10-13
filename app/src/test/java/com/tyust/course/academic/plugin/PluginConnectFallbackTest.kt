@@ -2,9 +2,12 @@ package com.tyust.course.academic.plugin
 
 import java.io.IOException
 import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Proxy
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import okhttp3.Dns
+import okhttp3.Call
 import okhttp3.EventListener
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
@@ -29,11 +32,50 @@ class PluginConnectFallbackTest {
     private fun client(dns: Dns, interceptor: Interceptor? = null): OkHttpClient =
         OkHttpClient.Builder()
             .dns(dns)
+            .proxy(Proxy.NO_PROXY)
             .retryOnConnectionFailure(false)
             .connectTimeout(1, TimeUnit.SECONDS)
             .callTimeout(5, TimeUnit.SECONDS)
             .apply { interceptor?.let(::addInterceptor) }
             .build()
+
+    private class Connections : EventListener() {
+        val attempts = mutableListOf<InetAddress>()
+
+        override fun connectStart(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy) {
+            attempts += inetSocketAddress.address
+        }
+    }
+
+    @Test
+    fun `only ipv4 address remains usable`() {
+        assertReachable("127.0.0.1", listOf("127.0.0.1"))
+    }
+
+    @Test
+    fun `only ipv6 address remains usable`() {
+        assertReachable("::1", listOf("::1"))
+    }
+
+    private fun assertReachable(bindAddress: String, addresses: List<String>) {
+        val server = MockWebServer()
+        val dns = CountingDns(addresses.map(InetAddress::getByName))
+        val client = client(dns)
+        val connections = Connections()
+        try {
+            server.start(InetAddress.getByName(bindAddress), 0)
+            server.enqueue(MockResponse().setBody("ok"))
+            val request = Request.Builder().url("http://plugin-fallback.test:${server.port}/").build()
+            PluginConnectFallbackCall(client, connections, request, PluginConnectFallback.MAX_ATTEMPTS)
+                .execute().use { assertEquals("ok", it.body!!.string()) }
+            assertEquals(1, dns.lookups.get())
+            assertEquals(1, connections.attempts.size)
+            assertEquals(1, server.requestCount)
+        } finally {
+            client.connectionPool.evictAll()
+            server.shutdown()
+        }
+    }
 
     @Test
     fun `falls back when ipv4 is first and only ipv6 is reachable`() {
@@ -42,16 +84,18 @@ class PluginConnectFallbackTest {
         server.enqueue(MockResponse().setBody("ok"))
         val request = Request.Builder().url("http://plugin-fallback.test:${server.port}/".toHttpUrl()).build()
         val dns = CountingDns(listOf(InetAddress.getByName("127.0.0.2"), InetAddress.getByName("::1")))
+        val connections = Connections()
 
         val response = PluginConnectFallbackCall(
             client(dns),
-            EventListener.NONE,
+            connections,
             request,
             PluginConnectFallback.MAX_ATTEMPTS,
         ).execute()
 
         response.use { assertEquals("ok", it.body!!.string()) }
-        assertEquals(2, dns.lookups.get())
+        assertEquals(1, dns.lookups.get())
+        assertEquals(listOf("127.0.0.2", "::1").map(InetAddress::getByName), connections.attempts)
         server.shutdown()
     }
 
@@ -62,16 +106,18 @@ class PluginConnectFallbackTest {
         server.enqueue(MockResponse().setBody("ok"))
         val request = Request.Builder().url("http://plugin-fallback.test:${server.port}/".toHttpUrl()).build()
         val dns = CountingDns(listOf(InetAddress.getByName("::1"), InetAddress.getByName("127.0.0.1")))
+        val connections = Connections()
 
         val response = PluginConnectFallbackCall(
             client(dns),
-            EventListener.NONE,
+            connections,
             request,
             PluginConnectFallback.MAX_ATTEMPTS,
         ).execute()
 
         response.use { assertEquals("ok", it.body!!.string()) }
-        assertEquals(2, dns.lookups.get())
+        assertEquals(1, dns.lookups.get())
+        assertEquals(listOf("::1", "127.0.0.1").map(InetAddress::getByName), connections.attempts)
         server.shutdown()
     }
 
@@ -128,16 +174,18 @@ class PluginConnectFallbackTest {
                 InetAddress.getByName("127.0.0.1"),
             ),
         )
+        val connections = Connections()
 
         val response = PluginConnectFallbackCall(
             client(dns),
-            EventListener.NONE,
+            connections,
             request,
             PluginConnectFallback.MAX_ATTEMPTS,
         ).execute()
 
         response.use { assertEquals("ok", it.body!!.string()) }
-        assertEquals(3, dns.lookups.get())
+        assertEquals(1, dns.lookups.get())
+        assertEquals(listOf("127.0.0.2", "127.0.0.3", "127.0.0.1").map(InetAddress::getByName), connections.attempts)
         server.shutdown()
     }
 
