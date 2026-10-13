@@ -105,7 +105,7 @@ async function command(action, input) {
     if (!current || current.handle !== input.handle) throw Error('Script handle is stale');
     if (input.expiresAt && input.expiresAt <= Date.now()) throw failure('TIMEOUT', '操作已过期，请重新确认当前提示');
     const isPrompt = action === 'script.interact';
-    const target = [...documents.values()].filter(d => isPrompt ? d.interaction?.id === input.interactionId : d.actions?.some(a=>a.id===input.actionId)).sort((a,b)=>a.frameId-b.frameId)[0];
+    const target = [...documents.values()].filter(d => (!input.documentId || d.key === input.documentId) && (isPrompt ? d.interaction?.id === input.interactionId : d.actions?.some(a=>a.id===input.actionId))).sort((a,b)=>a.frameId-b.frameId)[0];
     if (!target) throw failure('PAGE_CHANGED', '当前操作已失效，请刷新任务状态');
     const reply = await notify(target.tabId,target.frameId,{kind:isPrompt?'interact':'action',document:target.document,handle:current.handle,interactionId:input.interactionId,actionId:input.actionId,id:input.id,expiresAt:input.expiresAt});
     if (!reply?.accepted) throw failure('PAGE_CHANGED', '提示或任务状态已变化，未重复执行');
