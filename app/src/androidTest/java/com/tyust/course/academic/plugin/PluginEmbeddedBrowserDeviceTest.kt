@@ -34,6 +34,62 @@ class PluginEmbeddedBrowserDeviceTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private fun profile() = "plugin_" + PluginJson.sha256(UUID.randomUUID().toString().toByteArray())
 
+    @Test fun nestedProgressSettingsPersistAcrossRepeatedUserscriptWrites() {
+        assumeTrue("Opt in to the public test document with -e allowBrowserNetwork true",
+            InstrumentationRegistry.getArguments().getString("allowBrowserNetwork") == "true")
+        val profile = profile()
+        val vault = NativePluginVault(context, "storage-fixture-$profile")
+        val saved = CountDownLatch(12)
+        val errors = ConcurrentLinkedQueue<String>()
+        val latest = AtomicReference<JSONObject>()
+        try {
+            Client(profile) { event ->
+                when (event.optString("kind")) {
+                    "storage" -> if (event.optString("key") == "timelong") {
+                        val value = event.getJSONObject("value")
+                        vault.put("settings", JSONObject().put("timelong", value))
+                        latest.set(vault.get("settings")!!.getJSONObject("timelong"))
+                        saved.countDown()
+                    }
+                    "error" -> errors.add(event.optString("reason"))
+                }
+                JSONObject().put("ok", true)
+            }.use { client ->
+                client.configure()
+                val handle = "nested-storage-fixture"
+                val declaration = JSONObject("""{
+                    "matches":[{"host":"example.com","pathPrefix":"/"}],"exclude":[],
+                    "adapter":{"version":"fixture","settings":[],"startSelector":"#fixture-start",
+                    "runningSelector":"#fixture-running","logSelector":"#fixture-log"}
+                }""")
+                val source = """
+                    let count=0;
+                    function writeProgress(){
+                      const record=GM_getValue('timelong',{});
+                      record.unused=undefined;
+                      record.uFixture={time:++count,today:'2026d9d13',studyDetail:{cFixture:count}};
+                      GM_setValue('timelong',record);
+                      if(count<12)setTimeout(writeProgress,250);
+                    }
+                    writeProgress();
+                """.trimIndent()
+                client.call("script.start", JSONObject().put("handle", handle).put("source", source)
+                    .put("declaration", declaration).put("info", JSONObject().put("version", "1.0.0"))
+                    .put("values", JSONObject()).put("runAt", "document-end"))
+                client.call("page.open", JSONObject().put("url", "https://example.com/")
+                    .put("origins", JSONArray().put("https://example.com")).put("scriptHandle", handle)
+                    .put("active", false))
+                assertTrue("Nested progress writes did not persist; errors=$errors", saved.await(25, TimeUnit.SECONDS))
+                client.call("script.stop")
+                assertTrue("Successful progress writes reported errors: $errors", errors.isEmpty())
+                assertEquals(12, latest.get().getJSONObject("uFixture").getInt("time"))
+            }
+        } finally {
+            vault.clear()
+            File(context.noBackupFilesDir, "embedded-browser/$profile").deleteRecursively()
+        }
+    }
+
     @Test fun restoredExtensionConnectsBeforeOpeningAnyCourseAndKeepsCookies() {
         val profile = profile()
         try {

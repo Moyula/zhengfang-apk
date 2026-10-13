@@ -141,6 +141,10 @@ async function fromDocument(message, sender) {
   } else if (!documents.has(key)) throw Error('Script document has navigated');
   if (message.kind === 'closed') documents.delete(key);
   else if (message.kind === 'status') Object.assign(documents.get(key), {available:!!message.available, stage:message.stage,interaction:message.interaction,actions:message.actions});
+  // Native persistence uses JSON, while extension messages preserve undefined.
+  // Register exactly the persisted snapshot: nested undefined otherwise makes
+  // Gecko reject scriptMetadata after the encrypted write has already succeeded.
+  if (message.kind === 'storage') message = {...message, value:JSON.parse(JSON.stringify(message.value))};
   const handle = current.handle;
   const result = await browser.runtime.sendNativeMessage('zfBrowser', {...message, href:sender.url, documentId:key});
   if (!current || current.handle !== handle) throw Error('Script has stopped');
