@@ -32,7 +32,11 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
-class ScheduleReminderScheduler private constructor(private val context: Context) : Application.ActivityLifecycleCallbacks {
+class ScheduleReminderScheduler private constructor(
+    private val context: Context,
+    private val clock: () -> Long
+) : Application.ActivityLifecycleCallbacks {
+    private constructor(context: Context) : this(context, System::currentTimeMillis)
     private val preferences = context.getSharedPreferences("course_reminders", Context.MODE_PRIVATE)
     private val calendars = ScheduleCalendarStore(preferences) {
         ScheduleSettingsManager.getInstance().apply { init(context) }.getWeekStart()
@@ -66,14 +70,15 @@ class ScheduleReminderScheduler private constructor(private val context: Context
         UserManager.getInstance().init(application)
         application.registerActivityLifecycleCallbacks(this)
         scope.launch {
+            var coldStart = true
             UserManager.getInstance().sessionState.state.map { it.token.accountStorageKey to it.expired }
-                .distinctUntilChanged().collect { reconcile() }
+                .distinctUntilChanged().collect { reconcile(restoreAlarms = coldStart); coldStart = false }
         }
     }
 
-    private fun activeAccount(): String = UserManager.getInstance().let {
-        if (it.isLoggedIn && !it.isDemoMode) it.currentAccountStorageKey else ""
-    }
+    private fun activeAccount(): String = activeScheduleAccount().orEmpty()
+
+    internal fun hasScheduledReminders(): Boolean = scheduledPlans().isNotEmpty()
 
     private fun records() = ReminderJson.decode(preferences.getString("records", null))
     private fun save(records: List<CourseReminder>) {
@@ -113,7 +118,7 @@ class ScheduleReminderScheduler private constructor(private val context: Context
     }
 
     fun semesterSummary(account: String, term: String, courses: List<ScheduleCourseRecord>): SemesterReminderSummary =
-        SemesterReminders.summary(records(), account, term, courses, timeBase(account, term), permissions(), activeAccount(), System.currentTimeMillis())
+        SemesterReminders.summary(records(), account, term, courses, timeBase(account, term), permissions(), activeAccount(), clock())
 
     @Synchronized
     fun updateSnapshot(account: String, term: String, courses: List<ScheduleCourseRecord>) {
@@ -210,7 +215,7 @@ class ScheduleReminderScheduler private constructor(private val context: Context
     }
 
     fun status(key: CourseReminderKey): ReminderStatus = find(key)?.let {
-        CourseReminderPlanner.plan(it, timeBase(key.account, key.term), System.currentTimeMillis(), permissions(), activeAccount())
+        CourseReminderPlanner.plan(it, timeBase(key.account, key.term), clock(), permissions(), activeAccount())
     } ?: ReminderStatus(ReminderAvailability.Off)
 
     private fun alarmIntent(key: CourseReminderKey) = Intent(context, CourseReminderReceiver::class.java).apply {
@@ -257,17 +262,20 @@ class ScheduleReminderScheduler private constructor(private val context: Context
     }
 
     @Synchronized
-    fun reconcile(resetAlarms: Boolean = false) {
+    fun reconcile(resetAlarms: Boolean = false, restoreAlarms: Boolean = false) {
         val before = records()
         val synced = withStudyReminders(before)
         if (synced != before) save(synced)
-        if (resetAlarms) scheduledPlans().values.forEach { alarms.cancel(it.reminder.key) }
         val permission = permissions()
         try {
-            reconcileCourseReminders(records(), activeAccount(), { timeBase(it.account, it.term) }, permission, System.currentTimeMillis(), alarms)
+            // A PendingIntent token may outlive its AlarmManager entry after an OEM cleanup.
+            // Re-register on cold start/recovery without discarding the due occurrence first.
+            reconcileCourseReminders(records(), activeAccount(), { timeBase(it.account, it.term) }, permission,
+                clock(), alarms, restoreAlarms = resetAlarms || restoreAlarms)
         } catch (_: SecurityException) {
             scheduledPlans().values.forEach { alarms.cancel(it.reminder.key) }
         }
+        ScheduleBackgroundRefresh.sync(context, hasScheduledReminders())
         revision++
     }
 
@@ -309,11 +317,11 @@ class ScheduleReminderScheduler private constructor(private val context: Context
         if (!isCurrentReminderOccurrence(plan, record, timeBase(record.key.account, record.key.term), permissions(), activeAccount())) {
             reconcile(); return
         }
-        val now = System.currentTimeMillis()
+        val now = clock()
         if (now < plan.triggerAt) return
         // An old broadcast must never replace or advance a newer pending occurrence.
         savePlans(scheduledPlans() - id)
-        if (now >= plan.triggerAt && now < plan.startsAt) {
+        if (plan.canDeliverAt(now)) {
             val manager = context.getSystemService(NotificationManager::class.java)
             if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel(CHANNEL, "课程提醒", NotificationManager.IMPORTANCE_DEFAULT))
             val open = Intent(context, MainActivity::class.java).apply {
@@ -327,7 +335,7 @@ class ScheduleReminderScheduler private constructor(private val context: Context
             val course = occurrence(record, plan.startsAt)?.course ?: record.course
             val study = record.study
             val notification = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_course_reminder)
-                .setContentTitle(if (study == null) "${course.name} · 即将上课" else "${course.name} · 即将开始")
+                .setContentTitle("${course.name} · " + if (now >= plan.startsAt) "已开始" else if (study == null) "即将上课" else "即将开始")
                 .setContentText(if (study == null) listOf(course.location, "第 ${course.startPeriod}-${course.endPeriod} 节").filter { it.isNotBlank() }.joinToString(" · ")
                     else "${study.start} – ${study.end}")
                 .setContentIntent(content).setAutoCancel(true).setOnlyAlertOnce(true).build()

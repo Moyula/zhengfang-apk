@@ -152,6 +152,8 @@
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
+        <service android:name=".schedule.ScheduleRefreshJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE" android:exported="true" />
         <receiver
             android:name=".receiver.GrabAlarmReceiver"
             android:exported="false">

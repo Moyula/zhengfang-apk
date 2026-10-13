@@ -232,7 +232,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
                         .put("method", method).put("purpose", purpose).put("status", response.code)
                     if (response.code in 300..399) {
                         if (purpose == "mutation") throw PluginException(PluginErrorCode.RESULT_UNKNOWN, "写入请求发生跳转，请先核实结果")
-                        if (++redirected > 5) invalid("跳转次数超过上限")
+                        if (++redirected > com.tyust.course.academic.AcademicRedirects.MAX_REDIRECTS) invalid("跳转次数超过上限")
                         if (method !in setOf("GET", "HEAD") && response.code in setOf(307, 308)) invalid("不能自动重放写入请求跳转")
                         val resolved = url.resolve(response.header("Location").orEmpty()) ?: invalid("无效跳转")
                         val next = PluginRedirects.upgradeToHttps(url, resolved, upgradeHttpRedirects)

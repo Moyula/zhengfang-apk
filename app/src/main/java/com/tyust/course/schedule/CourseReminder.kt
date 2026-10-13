@@ -40,6 +40,10 @@ data class ReminderPermissions(val notifications: Boolean, val exactAlarms: Bool
 enum class ReminderAvailability { Off, NeedsPermission, NeedsTime, InvalidWeeks, Scheduled, NoUpcoming, InactiveAccount }
 
 data class PlannedReminder(val reminder: CourseReminder, val triggerAt: Long, val startsAt: Long)
+
+/** A short delivery grace handles a cold process and zero-minute reminders, never old history. */
+internal fun PlannedReminder.canDeliverAt(now: Long): Boolean =
+    now >= triggerAt && now < startsAt + 5 * 60_000L
 data class ReminderStatus(val availability: ReminderAvailability, val next: PlannedReminder? = null)
 
 object CourseReminderPlanner {
@@ -118,13 +122,14 @@ fun isCurrentReminderOccurrence(plan: PlannedReminder, reminder: CourseReminder,
 /** Repeated reconciliation has no side effects when the desired alarms already exist. */
 fun reconcileCourseReminders(reminders: List<CourseReminder>, activeAccount: String,
     timeBase: (CourseReminderKey) -> ScheduleTimeBase?, permissions: ReminderPermissions, now: Long,
-    alarms: ReminderAlarmPort, zone: TimeZone = TimeZone.getDefault()): Map<String, ReminderStatus> {
+    alarms: ReminderAlarmPort, zone: TimeZone = TimeZone.getDefault(), restoreAlarms: Boolean = false): Map<String, ReminderStatus> {
     val existing = alarms.scheduled()
     val status = reminders.associate { reminder ->
         val base = timeBase(reminder.key)
         val pending = existing[reminder.key.storageId]
-        val due = pending?.takeIf { now >= it.triggerAt && now < it.startsAt &&
-            isCurrentReminderOccurrence(it, reminder, base, permissions, activeAccount, zone) && alarms.exists(reminder.key) }
+        val due = pending?.takeIf { it.canDeliverAt(now) &&
+            isCurrentReminderOccurrence(it, reminder, base, permissions, activeAccount, zone) &&
+            (restoreAlarms || alarms.exists(reminder.key)) }
         // A resume/cold-start can run before Android delivers an already due alarm. Do not
         // replace its PendingIntent extras with the next week's occurrence in that window.
         reminder.key.storageId to (due?.let { ReminderStatus(ReminderAvailability.Scheduled, it) }
@@ -133,7 +138,7 @@ fun reconcileCourseReminders(reminders: List<CourseReminder>, activeAccount: Str
     val desired = status.mapNotNull { (id, state) -> state.next?.let { id to it } }.toMap()
     existing.filterKeys { it !in desired }.values.forEach { alarms.cancel(it.reminder.key) }
     desired.forEach { (id, plan) ->
-        if (existing[id] != plan || !alarms.exists(plan.reminder.key)) alarms.schedule(plan)
+        if (restoreAlarms || existing[id] != plan || !alarms.exists(plan.reminder.key)) alarms.schedule(plan)
     }
     return status
 }

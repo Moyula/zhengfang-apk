@@ -49,7 +49,7 @@ enum class ScheduleWidgetStyle(val title: String, val description: String, val p
     Countdown("倒计时", "2×1 · 距上课与下课还有多久，实时走动", ScheduleCountdownWidgetProvider::class.java)
 }
 
-/** Only local cache reads and an inexact, non-wakeup boundary alarm; never performs authentication. */
+/** Local cache reads and a non-wakeup boundary alarm; never performs authentication. */
 object ScheduleWidgetUpdater {
     const val ACTION_REFRESH = "com.tyust.course.action.REFRESH_SCHEDULE_WIDGET"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -85,12 +85,9 @@ object ScheduleWidgetUpdater {
 
     internal fun activeSnapshot(context: Context): ScheduleSnapshot? {
         val user = UserManager.getInstance()
-        val session = user.sessionState.state.value
+        val account = activeScheduleAccount(user) ?: return null
         val school = user.currentSchool ?: return null
-        if (user.isDemoMode || (!user.isLoggedIn && !(session.expired && user.hasSavedCookie())) ||
-            session.token.accountStorageKey != user.currentAccountStorageKey ||
-            user.savedAccounts.none { it.key == user.currentAccountKey }) return null
-        return ScheduleRepository(context).snapshot(user.currentAccountStorageKey, school.id)
+        return ScheduleRepository(context).snapshot(account, school.id)
     }
 
     fun update(context: Context) {
@@ -98,7 +95,7 @@ object ScheduleWidgetUpdater {
         val ids = ScheduleWidgetStyle.entries.flatMap { style ->
             manager.getAppWidgetIds(ComponentName(context, style.provider)).map { it to style }
         }
-        if (ids.isEmpty()) { cancel(context); return }
+        if (ids.isEmpty()) { cancel(context); ScheduleBackgroundRefresh.sync(context); return }
         val now = System.currentTimeMillis()
         val state = ScheduleWidgetState.from(activeSnapshot(context), now)
         ids.forEach { (id, style) ->
@@ -107,9 +104,9 @@ object ScheduleWidgetUpdater {
         }
         cancel(context)
         state.agenda?.let { agenda ->
-            context.getSystemService(AlarmManager::class.java).set(AlarmManager.RTC,
-                agenda.nextChangeAt.coerceAtLeast(now + 1_000), alarm(context))
+            ScheduleWidgetBoundaryAlarm.schedule(context, agenda.nextChangeAt.coerceAtLeast(now + 1_000), alarm(context))
         }
+        ScheduleBackgroundRefresh.sync(context)
     }
 
     private fun alarm(context: Context) = PendingIntent.getBroadcast(context, 0,

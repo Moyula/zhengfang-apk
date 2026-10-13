@@ -2,7 +2,7 @@
 
 本目录是 `zhengfang-apk` 的内部工程文档。**面向使用者的内容在根目录 [README.md](../README.md)（中文）与 [README.en.md](../README.en.md)（English）**；逐版本发布说明在 [release-notes/](../release-notes/)；变更日志在 [CHANGELOG.md](../CHANGELOG.md)。
 
-当前版本：**App 1.0.116 / code116**，宿主 **SDK 3.6.0**，插件 **API 主版本 3**。版本号以 [app/version.properties](../app/version.properties) 为准。
+当前版本：**App 1.0.120 / code120**，宿主 **SDK 3.6.0**，插件 **API 主版本 3**。版本号以 [app/version.properties](../app/version.properties) 为准。
 
 ## 状态标记
 
@@ -68,6 +68,7 @@
 
 | 文档 | 状态 | 内容 |
 | --- | --- | --- |
+| [schedule/BACKGROUND-REMINDERS.md](schedule/BACKGROUND-REMINDERS.md) | 当前 | 课程提醒与小组件后台恢复、账号隔离及 vivo 核对方法 |
 | [images/liquid-glass/README.md](images/liquid-glass/README.md) | 当前 | README 界面素材的来源、设备与版本说明 |
 | [superpowers/plans/2026-08-17-zhengfang-app-promo-video.md](superpowers/plans/2026-08-17-zhengfang-app-promo-video.md) | 历史 | 宣传片实施计划（工程不在本仓库内） |
 | [superpowers/specs/2026-08-17-zhengfang-app-promo-video-design.md](superpowers/specs/2026-08-17-zhengfang-app-promo-video-design.md) | 历史 | 宣传片设计规格 |
