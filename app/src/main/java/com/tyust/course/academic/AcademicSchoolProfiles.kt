@@ -7,6 +7,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 /** School deployment defaults, separate from reusable protocol packages. */
 object AcademicSchoolProfiles {
     const val LNTU_BASE_PATH = "/http-8080/77726476706e69737468656265737421fae05988693c66446b468ca88d1b203b/eams"
+    const val LNTU_LOGIN_URL = "https://webvpn.lntu.edu.cn/https/77726476706e69737468656265737421f1e2559434357a467b1ac7a09641367b918300a4219f/authserver/login?service=https%3A%2F%2Fwebvpn.lntu.edu.cn%2Flogin%3Fcas_login%3Dtrue"
     const val HNAE_LOGIN_URL = "https://cas.hnae.edu.cn:8003/cas/login?service=https%3A%2F%2Fjw.hnae.edu.cn%2Fcaslogin"
     data class Profile(val id: String, val name: String, val system: AcademicSystem,
         val address: AcademicAddress, val loginUrl: String, val aliases: List<AcademicAddress> = emptyList(),
@@ -28,7 +29,7 @@ object AcademicSchoolProfiles {
         Profile("lntu", "辽宁工程技术大学", AcademicSystem.EAMS,
             AcademicAddress("https", "webvpn.lntu.edu.cn", LNTU_BASE_PATH), "https://webvpn.lntu.edu.cn/",
             aliases = listOf(AcademicAddress("http", "jwxt.lntu.edu.cn:8080", "/eams")),
-            loginAliases = listOf("https://webvpn.lntu.edu.cn/https/77726476706e69737468656265737421f1e2559434357a467b1ac7a09641367b918300a4219f/authserver/login?service=https%3A%2F%2Fwebvpn.lntu.edu.cn%2Flogin%3Fcas_login%3Dtrue")),
+            loginAliases = listOf(LNTU_LOGIN_URL)),
         Profile("cduestc", "电子科技大学成都学院", AcademicSystem.EAMS,
             AcademicAddress("https", "www.cduestc.cn", "/eams"), "https://www.cduestc.cn/eams/loginExt.action"),
         Profile("wtc", "武汉职业技术大学", AcademicSystem.CHAOXING_ACADEMIC,
