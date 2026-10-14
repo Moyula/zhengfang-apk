@@ -44,6 +44,16 @@ class PublicAuditCoverageTests(unittest.TestCase):
         self.add_file('tests/security-policy.test.mjs')
         self.assertIn('tests/foreground-script.test.mjs', self_test_files(self.kit, '3.6.2'))
         self.assertIn('tests/security-policy.test.mjs', self_test_files(self.kit, '3.6.2'))
+        with self.assertRaisesRegex(RuntimeError, 'SELF_TEST_FILES_MISSING'):
+            self_test_files(self.kit, '3.7.0')
+        for name in ['kingo', 'kingo-des', 'lntu']:
+            self.add_file('tests/'+name+'.test.mjs')
+        files = self_test_files(self.kit, '3.7.0')
+        self.assertTrue({'tests/kingo.test.mjs', 'tests/kingo-des.test.mjs', 'tests/lntu.test.mjs'}.issubset(files))
+        self.assertEqual(len(set(files)), len(files))
+        (self.kit/'tests/kingo-des.test.mjs').unlink()
+        with self.assertRaisesRegex(RuntimeError, 'SELF_TEST_FILES_MISSING'):
+            self_test_files(self.kit, '3.7.1')
         (self.kit/'tests/chaoxing-academic.test.mjs').unlink()
         with self.assertRaisesRegex(RuntimeError, 'SELF_TEST_FILES_MISSING'):
             self_test_files(self.kit, '3.5.1')
