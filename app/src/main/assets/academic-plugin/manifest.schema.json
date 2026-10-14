@@ -44,7 +44,8 @@
         "builtin.jinzhi",
         "builtin.chengfang",
         "builtin.eams",
-        "builtin.chaoxing_academic"
+        "builtin.chaoxing_academic",
+        "builtin.kingo"
       ]
     },
     "entry": {
@@ -151,6 +152,10 @@
                 "examTable"
               ]
             },
+            "webVpnTarget": {
+              "type": "string",
+              "pattern": "^[a-z0-9.-]+(?::[1-9][0-9]{0,4})?$"
+            },
             "periods": {
               "type": "array",
               "items": {
@@ -196,6 +201,52 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 2000
+            }
+          },
+          "required": [
+            "protocol"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "protocol": {
+              "const": "kingo"
+            },
+            "loginUrl": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "periods": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "number": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 30
+                  },
+                  "start": {
+                    "type": "string",
+                    "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                  },
+                  "end": {
+                    "type": "string",
+                    "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                  }
+                },
+                "required": [
+                  "number",
+                  "start",
+                  "end"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 30,
+              "minItems": 1
             }
           },
           "required": [

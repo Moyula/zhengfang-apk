@@ -211,6 +211,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
                     supplied.optString("Content-Type", "application/x-www-form-urlencoded; charset=$charsetName").toMediaType())
                 builder.method(method, body)
             } else builder.method(method, null)
+            PluginRequestPacing.await(operation, url)
             if (purpose == "mutation") {
                 if (approvedSharedWrite && sharedRequest != null) operation.markAuthorizedSharedWrite()
                 else operation.markMutation()
