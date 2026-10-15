@@ -47,7 +47,7 @@
       "id": "org.zf.protocol.kingo",
       "type": "kingo",
       "asset": "kingo.eduplugin",
-      "sha256": "1f40b340a35779dcc3bbe5d8b789343bd8eb8353cfdcad8c8c187c70b5598aec"
+      "sha256": "ce934a7e5dfc5faac2109eb3b1bba84ad70e2196ec975e1a3b731017e01e234a"
     },
     {
       "id": "org.zf.protocol.chaoxing-academic",

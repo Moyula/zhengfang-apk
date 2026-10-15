@@ -58,9 +58,11 @@ class PluginLiveSchoolDeviceTest {
                 val pkg = AcademicProviderRegistry.packages().install(File(directory, "$slug.eduplugin").readBytes(), true)
                 AcademicProviderRegistry.reload()
                 school = AcademicProviderRegistry.school(pkg)
+                school = AcademicProviderRegistry.bindSchool(pkg, school)
+                if (profile.optBoolean("useBuiltin")) AcademicProviderRegistry.choose(school, "builtin.${school.academicSystem}")
                 val current = AcademicGatewayFactory.create(school, account) as PluginAcademicAdapter
                 adapter = current
-                report.put("provider", pkg.manifest.id).put("version", current.version)
+                report.put("provider", current.pinned.manifest.id).put("version", current.version)
                 report.put("phase", "auth.start")
                 var login = withTimeout(60_000) { current.login(Credentials(profile.getString("username"), profile.getString("password"))) }
                 report.put("initialLogin", login.status.name)
@@ -111,6 +113,7 @@ class PluginLiveSchoolDeviceTest {
                 probe("terms") { current.catalog().also { catalog = it }.terms.size }
                 catalog?.let { terms ->
                     probe("schedule") { current.schedule(terms.currentTerm).size }
+                    probe("scheduleRefresh") { current.schedule(terms.currentTerm).size }
                     probe("exams") { current.exams(terms.currentTerm).size }
                     probe("calendar") { current.calendar(terms.currentTerm) != null }
                 }

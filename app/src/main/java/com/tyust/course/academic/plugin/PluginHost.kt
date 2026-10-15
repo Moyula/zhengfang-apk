@@ -222,6 +222,7 @@ class PluginHost(private val operation: PluginOperation, private val storageRoot
             try {
                 call.execute().use { response ->
                     operation.requireActive()
+                    authScope?.responseReceived(url)
                     if (sessionToken != null && response.code in setOf(401, 403)) {
                         synchronized(tokenSession) {
                             operation.requireActive()

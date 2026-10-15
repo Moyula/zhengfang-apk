@@ -1852,7 +1852,7 @@
         ],
         "additionalProperties": false
       },
-      "maxItems": 60
+      "maxItems": 80
     },
     "school": {
       "type": "object",
