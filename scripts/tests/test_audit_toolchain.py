@@ -51,6 +51,11 @@ class PublicAuditCoverageTests(unittest.TestCase):
         files = self_test_files(self.kit, '3.7.0')
         self.assertTrue({'tests/kingo.test.mjs', 'tests/kingo-des.test.mjs', 'tests/lntu.test.mjs'}.issubset(files))
         self.assertEqual(len(set(files)), len(files))
+        with self.assertRaisesRegex(RuntimeError, 'SELF_TEST_FILES_MISSING'):
+            self_test_files(self.kit, '3.7.1')
+        self.add_file('tests/auth-scope.test.mjs')
+        self.assertIn('tests/auth-scope.test.mjs', self_test_files(self.kit, '3.7.1'))
+        self.assertNotIn('tests/auth-scope.test.mjs', self_test_files(self.kit, '3.7.0'))
         (self.kit/'tests/kingo-des.test.mjs').unlink()
         with self.assertRaisesRegex(RuntimeError, 'SELF_TEST_FILES_MISSING'):
             self_test_files(self.kit, '3.7.1')
