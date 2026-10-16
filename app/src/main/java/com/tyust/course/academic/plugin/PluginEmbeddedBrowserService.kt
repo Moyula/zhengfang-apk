@@ -284,8 +284,11 @@ class PluginEmbeddedBrowserService : Service() {
                 }
                 return GeckoResult.fromValue(if (request.uri == "about:blank" || allows(request.uri, p.origins)) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
             }
-            override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny> =
-                GeckoResult.fromValue(if (request.uri == "about:blank" || allows(request.uri, PluginJson.objects(config.getJSONArray("network")).map { it.getString("origin") }.toSet())) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
+            override fun onSubframeLoadRequest(session: GeckoSession, request: GeckoSession.NavigationDelegate.LoadRequest): GeckoResult<AllowOrDeny> {
+                val runningScript = p.scriptHandle != null && script?.optString("handle") == p.scriptHandle
+                return GeckoResult.fromValue(if (PluginBrowserNavigation.allowsLocalSubframe(request.uri, runningScript) ||
+                    allows(request.uri, PluginJson.objects(config.getJSONArray("network")).map { it.getString("origin") }.toSet())) AllowOrDeny.ALLOW else AllowOrDeny.DENY)
+            }
             override fun onLocationChange(session: GeckoSession, url: String?, perms: MutableList<GeckoSession.PermissionDelegate.ContentPermission>, hasUserGesture: Boolean) {
                 if (url != null) p.url = url
                 EmbeddedBrowserRuntime.activity?.updateBar()

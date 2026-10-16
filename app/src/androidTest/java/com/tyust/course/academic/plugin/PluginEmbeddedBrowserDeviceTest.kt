@@ -15,6 +15,10 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.json.JSONArray
 import org.json.JSONObject
+import com.tyust.course.academic.AcademicSessionStore
+import kotlinx.coroutines.runBlocking
+import okhttp3.Cookie
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -27,12 +31,141 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Uses a synthetic profile and the real, separate Gecko service; never reads plugin accounts. */
+/** Uses isolated profiles and the real Gecko service. Live diagnostics require explicit private fixtures and opt-in. */
 @RunWith(AndroidJUnit4::class)
 @SdkSuppress(minSdkVersion = 26)
 class PluginEmbeddedBrowserDeviceTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private fun profile() = "plugin_" + PluginJson.sha256(UUID.randomUUID().toString().toByteArray())
+
+    /** Opt-in diagnostic: original script, synthetic bank replies, no answer/progress writes. */
+    @Test fun authorizedOriginalChapterScriptReadOnlyDiagnostic() {
+        assumeTrue("Opt in with -e allowChapterScriptRead true",
+            InstrumentationRegistry.getArguments().getString("allowChapterScriptRead") == "true")
+        val input = File(context.filesDir, "chapter-script-live.json")
+        assumeTrue("No authorized diagnostic supplied", input.isFile)
+        val config = JSONObject(input.readText())
+        val original = File(context.filesDir, "chapter-script-original.js").readText()
+        val pkg = AcademicProviderRegistry.packages().list().first { it.manifest.id == "community.chaoxing" }
+        val declaration = pkg.manifest.json.getJSONArray("userscripts").getJSONObject(0)
+        val session = AcademicSessionStore().session("synthetic-script-host", "dev:script-${UUID.randomUUID()}", "https://mooc1.chaoxing.com")
+        val profile = profile()
+        val trace = ConcurrentLinkedQueue<JSONObject>()
+        val stage = AtomicReference("")
+        val prompt = AtomicReference<JSONObject>()
+        val questionLookup = CountDownLatch(1)
+        val questionDocument = CountDownLatch(1)
+        val handle = "chapter-original-diagnostic"
+        val allowedReads = setOf("/ananas/ueditor/ueditor.parse.js", "/mycourse/studentstudycourselist",
+            "/mooc-ans/mycourse/studentstudycourselist", "/knowledge/cards", "/mooc-ans/knowledge/cards",
+            "/work/phone/work", "/mooc-ans/work/phone/work", "/stat2/chapter-exam/s/tests/data")
+        try {
+            for (item in PluginJson.objects(config.getJSONArray("cookies"))) {
+                val domain = item.getString("domain").trimStart('.')
+                require(domain == "chaoxing.com" || domain.endsWith(".chaoxing.com"))
+                val cookie = Cookie.Builder().name(item.getString("name")).value(item.getString("value"))
+                    .domain(domain).path(item.getString("path")).apply { if(item.optBoolean("secure")) secure() }.build()
+                session.cookies.saveFromResponse("https://$domain/".toHttpUrl(), listOf(cookie))
+            }
+            Client(profile) { event ->
+                when (event.optString("kind")) {
+                    "status" -> { stage.set(event.optString("stage")); prompt.set(event.optJSONObject("interaction")); trace.add(JSONObject().put("stage",stage.get())) }
+                    "storage" -> {
+                        if (event.optString("key") == "diagnostic-frame") {
+                            trace.add(event.getJSONObject("value"))
+                            if(event.getJSONObject("value").optInt("questions")>0 && event.getJSONObject("value").optBoolean("questionId")) questionDocument.countDown()
+                            File(context.getExternalFilesDir(null),"chapter-script-diagnostic.json").writeText(JSONArray(trace.toList()).toString(2))
+                        }
+                        JSONObject().put("ok",true)
+                    }
+                    "request" -> {
+                        val request = event.getJSONObject("request")
+                        val url = request.getString("url").toHttpUrl()
+                        val method = request.optString("method", "GET")
+                        val record = JSONObject().put("host",url.host).put("path",url.encodedPath).put("method",method)
+                        trace.add(record)
+                        if (url.host.endsWith("wanjuantiku.com")) {
+                            val body = when(url.encodedPath) {
+                                "/api/status" -> """{"status":"t"}"""
+                                "/api/checkLeft" -> """{"data":999,"msg":""}"""
+                                else -> {
+                                    if(url.encodedPath=="/api/query") questionLookup.countDown()
+                                    """{"code":0,"data":[],"msg":"Read-only diagnostic"}"""
+                                }
+                            }
+                            JSONObject().put("ok",true).put("response",JSONObject().put("status",200).put("url",url.toString()).put("headers",JSONObject()).put("body",body))
+                        } else if (method == "GET" && url.host.endsWith(".chaoxing.com") && url.encodedPath in allowedReads) {
+                            val operation = PluginOperation(session,pkg.manifest,"host.effect")
+                            try {
+                                val response = runBlocking { PluginHost(operation,context.cacheDir,userscriptHeaders=true).call("http",
+                                    JSONObject().put("url",url.toString()).put("purpose","query").put("headers",request.optJSONObject("headers") ?: JSONObject())) }.getJSONObject("data")
+                                record.put("status",response.getInt("status")).put("quiz",response.optString("body").contains("submitData()"))
+                                JSONObject().put("ok",true).put("response",response)
+                            } catch(error:Throwable) {
+                                record.put("error",(error as? PluginException)?.code?.name ?: error.javaClass.simpleName)
+                                JSONObject().put("ok",false).put("error","NETWORK_RETRYABLE")
+                            } finally { operation.close() }
+                        } else {
+                            record.put("blocked",true)
+                            JSONObject().put("ok",false).put("error","PERMISSION_DENIED")
+                        }
+                    }
+                    else -> JSONObject().put("ok",true)
+                }.let { if(it is JSONObject) it else JSONObject().put("ok",true) }
+            }.use { client ->
+                val network = JSONArray()
+                for (host in listOf("mooc1.chaoxing.com","mooc-res2.chaoxing.com")) {
+                    for(path in listOf("/mooc-ans/course", "/js", "/mooc-ans/js", "/mooc-ans/work/js", "/mooc2/js", "/mooc2-ans/js"))
+                        network.put(JSONObject().put("origin","https://$host").put("pathPrefix",path).put("methods",JSONArray().put("GET")).put("purposes",JSONArray().put("query")))
+                }
+                client.configure(JSONObject().put("title","Read-only original script diagnostic").put("origins",JSONArray().put("https://mooc1.chaoxing.com")).put("network",network))
+                for (item in PluginJson.objects(config.getJSONArray("cookies")).filter {
+                    val domain=it.getString("domain").trimStart('.')
+                    domain=="mooc1.chaoxing.com" || "mooc1.chaoxing.com".endsWith(".$domain")
+                }) client.call("cookies.write",JSONObject()
+                    .put("url","https://mooc1.chaoxing.com/").put("cookie","${item.getString("name")}=${item.getString("value")}; Domain=${item.getString("domain")}; Path=${item.getString("path")}; Secure"))
+                val monitor = """
+                    window.addEventListener('unhandledrejection',event=>GM_setValue('diagnostic-frame',{
+                      exception:event.reason?.name||'rejection',message:String(event.reason?.message||'').replace(/https?:\S+/g,'[url]').slice(0,200),
+                      stack:String(event.reason?.stack||'').split('\n').slice(0,3).map(x=>x.replace(/https?:\S+/g,'[url]')).join('\n')}));
+                    setInterval(()=>{
+                      try {
+                        const d=unsafeWindow.document,f=d.querySelector('#iframe_content iframe');
+                        GM_setValue('diagnostic-frame',{frame:!!f,ready:f?.contentDocument?.readyState||'',
+                          questions:f?.contentDocument?.querySelectorAll('.Py-mian1').length||0,
+                          questionId:!!f?.contentDocument?.querySelector('#oldWorkId,#workLibraryId'),
+                          waiting:!!unsafeWindow.wait,progress:d.querySelector('#leftNum')?.textContent||''});
+                      }catch(error){GM_setValue('diagnostic-frame',{error:error.name,message:String(error.message).slice(0,200)});}
+                    },3000);
+                """.trimIndent()
+                val values = JSONObject().put("shenchanranToken","0123456789abcdef0123456789abcdef").put("doVideo",false)
+                    .put("doDocument",false).put("doLive",false).put("doRenwu",false).put("doWork",true)
+                    .put("doNoMission",true).put("autoSubmit",false).put("doAI",false)
+                client.call("script.start",JSONObject().put("handle",handle).put("source",monitor+"\n"+original)
+                    .put("declaration",declaration).put("info",JSONObject().put("version","3.0.3")).put("values",values))
+                val course = config.getString("url").toHttpUrl()
+                val url = "https://mooc1.chaoxing.com/mooc-ans/course/999999999303.html?ut=s&classid=" + course.queryParameter("clazzid") + "&courseid=" + course.queryParameter("courseid") + "&cpi=" + course.queryParameter("cpi") + "&coursename=ReadOnly"
+                client.call("page.open",JSONObject().put("url",url).put("origins",JSONArray().put("https://mooc1.chaoxing.com")).put("scriptHandle",handle).put("active",false))
+                val deadline=System.currentTimeMillis()+45_000
+                val acknowledged=mutableSetOf<String>()
+                while(stage.get()!="ready" && System.currentTimeMillis()<deadline) {
+                    val notice=prompt.get()
+                    if(notice?.optString("ruleId")=="notice" && notice.optString("message").contains("牢记脚本官网") && acknowledged.add(notice.getString("id")))
+                        client.call("script.interact",JSONObject().put("handle",handle).put("interactionId",notice.getString("id")).put("actionId","confirm"))
+                    Thread.sleep(500)
+                }
+                assertEquals("Original initialization did not finish; stages=${trace.filter { it.has("stage") }}","ready",stage.get())
+                assertTrue(client.call("script.control",JSONObject().put("handle",handle).put("action","start")).optBoolean("accepted"))
+                assertTrue("Question lookup not reached; see private diagnostic report",questionLookup.await(100,TimeUnit.SECONDS))
+                assertTrue("Question document was not observed",questionDocument.await(5,TimeUnit.SECONDS))
+                client.call("script.stop")
+            }
+        } finally {
+            File(context.getExternalFilesDir(null),"chapter-script-diagnostic.json").writeText(JSONArray(trace.toList()).toString(2))
+            session.retire()
+            File(context.noBackupFilesDir,"embedded-browser/$profile").deleteRecursively()
+        }
+    }
 
     @Test fun nestedProgressSettingsPersistAcrossRepeatedUserscriptWrites() {
         assumeTrue("Opt in to the public test document with -e allowBrowserNetwork true",
@@ -462,11 +595,11 @@ class PluginEmbeddedBrowserDeviceTest {
                 connection, Context.BIND_AUTO_CREATE))
             assertTrue("Browser service did not bind", connected.await(10, TimeUnit.SECONDS))
         }
-        fun configure() {
-            call("configure", JSONObject("""{
+        fun configure(configuration: JSONObject = JSONObject("""{
                 "title":"Synthetic Gecko test","origins":["https://example.com"],
                 "network":[{"origin":"https://example.com","pathPrefix":"/","methods":["GET"],"purposes":["query"]}]
-            }"""))
+            }""")) {
+            call("configure", configuration)
             initialized = true
         }
         fun call(action: String, input: JSONObject = JSONObject()): JSONObject =
