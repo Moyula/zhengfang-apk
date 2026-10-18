@@ -38,7 +38,7 @@ class PluginEmbeddedBrowserDeviceTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private fun profile() = "plugin_" + PluginJson.sha256(UUID.randomUUID().toString().toByteArray())
 
-    /** Opt-in diagnostic: original script, synthetic bank replies, no answer/progress writes. */
+    /** Opt-in: original script, GET-only school resources, at most three authorized real bank queries. */
     @Test fun authorizedOriginalChapterScriptReadOnlyDiagnostic() {
         assumeTrue("Opt in with -e allowChapterScriptRead true",
             InstrumentationRegistry.getArguments().getString("allowChapterScriptRead") == "true")
@@ -48,6 +48,14 @@ class PluginEmbeddedBrowserDeviceTest {
         val original = File(context.filesDir, "chapter-script-original.js").readText()
         val pkg = AcademicProviderRegistry.packages().list().first { it.manifest.id == "community.chaoxing" }
         val declaration = pkg.manifest.json.getJSONArray("userscripts").getJSONObject(0)
+        val actualBank = InstrumentationRegistry.getArguments().getString("useActualBank") == "true"
+        val bankToken = if (actualBank) {
+            val owner = PluginServiceAccounts(context).session(pkg, "chaoxing")
+            PluginUserscripts.store(context, pkg, owner, declaration.getString("id")).settings().getString("shenchanranToken")
+                .also { require(it.isNotBlank()) }
+        } else "0123456789abcdef0123456789abcdef"
+        val actualQueries = AtomicInteger()
+        val queryLimit = InstrumentationRegistry.getArguments().getString("maxActualQueries")?.toInt()?.coerceIn(1,3) ?: 1
         val session = AcademicSessionStore().session("synthetic-script-host", "dev:script-${UUID.randomUUID()}", "https://mooc1.chaoxing.com")
         val profile = profile()
         val trace = ConcurrentLinkedQueue<JSONObject>()
@@ -71,6 +79,7 @@ class PluginEmbeddedBrowserDeviceTest {
                 when (event.optString("kind")) {
                     "status" -> { stage.set(event.optString("stage")); prompt.set(event.optJSONObject("interaction")); trace.add(JSONObject().put("stage",stage.get())) }
                     "storage" -> {
+                        trace.add(JSONObject().put("write",event.optString("key")))
                         if (event.optString("key") == "diagnostic-frame") {
                             trace.add(event.getJSONObject("value"))
                             if(event.getJSONObject("value").optInt("questions")>0 && event.getJSONObject("value").optBoolean("questionId")) questionDocument.countDown()
@@ -82,9 +91,38 @@ class PluginEmbeddedBrowserDeviceTest {
                         val request = event.getJSONObject("request")
                         val url = request.getString("url").toHttpUrl()
                         val method = request.optString("method", "GET")
+                        if(url.encodedPath == "/__host_diagnostic__/state") {
+                            val sample = JSONObject(url.queryParameter("sample")!!)
+                            trace.add(sample)
+                            if(sample.optInt("questions")>0 && sample.optBoolean("questionId")) questionDocument.countDown()
+                            File(context.getExternalFilesDir(null),"chapter-script-diagnostic.json").writeText(JSONArray(trace.toList()).toString(2))
+                            return@Client JSONObject().put("ok",true).put("response",JSONObject().put("status",200).put("url",url.toString()).put("headers",JSONObject()).put("body","{}"))
+                        }
                         val record = JSONObject().put("host",url.host).put("path",url.encodedPath).put("method",method)
                         trace.add(record)
-                        if (url.host.endsWith("wanjuantiku.com")) {
+                        if (actualBank && url.host.endsWith("wanjuantiku.com") &&
+                            url.encodedPath in setOf("/api/status", "/api/checkLeft", "/api/query") &&
+                            (url.encodedPath != "/api/query" || actualQueries.incrementAndGet() <= queryLimit)) {
+                            val operation = PluginOperation(session,pkg.manifest,"host.effect")
+                            try {
+                                val args = JSONObject().put("url",url.toString()).put("method",method)
+                                    .put("purpose","query").put("headers",request.optJSONObject("headers") ?: JSONObject())
+                                if(method == "POST" && !request.isNull("body")) args.put("body",request.getString("body"))
+                                val response = runBlocking { PluginHost(operation,context.cacheDir,userscriptHeaders=true).call("http",args) }.getJSONObject("data")
+                                val result = runCatching { JSONObject(response.optString("body")) }.getOrNull()
+                                record.put("status",response.getInt("status")).put("code",result?.optInt("code"))
+                                if(url.encodedPath == "/api/checkLeft") record.put("balance",result?.opt("data"))
+                                if(url.encodedPath == "/api/query") {
+                                    record.put("answerPresent",!result?.optString("data").isNullOrBlank()).put("balance",result?.opt("left"))
+                                    record.put("answerKind",result?.opt("data")?.javaClass?.simpleName)
+                                    questionLookup.countDown()
+                                }
+                                JSONObject().put("ok",true).put("response",response)
+                            } catch(error:Throwable) {
+                                record.put("error",(error as? PluginException)?.code?.name ?: error.javaClass.simpleName)
+                                JSONObject().put("ok",false).put("error","NETWORK_RETRYABLE")
+                            } finally { operation.close() }
+                        } else if (url.host.endsWith("wanjuantiku.com")) {
                             val body = when(url.encodedPath) {
                                 "/api/status" -> """{"status":"t"}"""
                                 "/api/checkLeft" -> """{"data":999,"msg":""}"""
@@ -110,13 +148,19 @@ class PluginEmbeddedBrowserDeviceTest {
                             JSONObject().put("ok",false).put("error","PERMISSION_DENIED")
                         }
                     }
-                    else -> JSONObject().put("ok",true)
+                    else -> { trace.add(JSONObject().put("event",event.optString("kind")).put("reason",event.optString("reason"))); JSONObject().put("ok",true) }
                 }.let { if(it is JSONObject) it else JSONObject().put("ok",true) }
             }.use { client ->
                 val network = JSONArray()
                 for (host in listOf("mooc1.chaoxing.com","mooc-res2.chaoxing.com")) {
                     for(path in listOf("/mooc-ans/course", "/js", "/mooc-ans/js", "/mooc-ans/work/js", "/mooc2/js", "/mooc2-ans/js"))
                         network.put(JSONObject().put("origin","https://$host").put("pathPrefix",path).put("methods",JSONArray().put("GET")).put("purposes",JSONArray().put("query")))
+                }
+                if (InstrumentationRegistry.getArguments().getString("fullReadResources") != "false") {
+                    for (rule in PluginJson.objects(pkg.manifest.json.getJSONArray("network"))) {
+                        if ("GET" in PluginJson.strings(rule.getJSONArray("methods")))
+                            network.put(JSONObject(rule.toString()).put("methods",JSONArray().put("GET")))
+                    }
                 }
                 client.configure(JSONObject().put("title","Read-only original script diagnostic").put("origins",JSONArray().put("https://mooc1.chaoxing.com")).put("network",network))
                 for (item in PluginJson.objects(config.getJSONArray("cookies")).filter {
@@ -125,20 +169,29 @@ class PluginEmbeddedBrowserDeviceTest {
                 }) client.call("cookies.write",JSONObject()
                     .put("url","https://mooc1.chaoxing.com/").put("cookie","${item.getString("name")}=${item.getString("value")}; Domain=${item.getString("domain")}; Path=${item.getString("path")}; Secure"))
                 val monitor = """
-                    window.addEventListener('unhandledrejection',event=>GM_setValue('diagnostic-frame',{
+                    const report=value=>GM_xmlhttpRequest({url:'https://mooc1.chaoxing.com/__host_diagnostic__/state?sample='+encodeURIComponent(JSON.stringify(value)),onload(){}});
+                    window.addEventListener('unhandledrejection',event=>report({
                       exception:event.reason?.name||'rejection',message:String(event.reason?.message||'').replace(/https?:\S+/g,'[url]').slice(0,200),
                       stack:String(event.reason?.stack||'').split('\n').slice(0,3).map(x=>x.replace(/https?:\S+/g,'[url]')).join('\n')}));
                     setInterval(()=>{
                       try {
                         const d=unsafeWindow.document,f=d.querySelector('#iframe_content iframe');
-                        GM_setValue('diagnostic-frame',{frame:!!f,ready:f?.contentDocument?.readyState||'',
+                        report({frame:!!f,ready:f?.contentDocument?.readyState||'',
                           questions:f?.contentDocument?.querySelectorAll('.Py-mian1').length||0,
                           questionId:!!f?.contentDocument?.querySelector('#oldWorkId,#workLibraryId'),
+                          saveFunction:typeof f?.contentWindow?.noSubmit,
+                          waivedSaveFunction:typeof f?.contentWindow?.wrappedJSObject?.noSubmit,
+                          filled:f?.contentDocument?.querySelectorAll('input:checked').length||0,
+                          selected:f?.contentDocument?.querySelectorAll('li.cur').length||0,
+                          answered:[...(f?.contentDocument?.querySelectorAll('input.answerInput,input[id^="answer"],textarea[id^="answer"]')||[])].filter(n=>!n.id.startsWith('answertype')&&n.value!=='').length,
+                          unexpectedError:(d.querySelector('#log')?.textContent||'').includes('出现无法预料的错误'),
+                          noAnswers:(d.querySelector('#log')?.textContent||'').includes('一道题都没查出来'),
+                          attemptedSave:(d.querySelector('#log')?.textContent||'').includes('自动保存'),
                           waiting:!!unsafeWindow.wait,progress:d.querySelector('#leftNum')?.textContent||''});
-                      }catch(error){GM_setValue('diagnostic-frame',{error:error.name,message:String(error.message).slice(0,200)});}
+                      }catch(error){report({error:error.name,message:String(error.message).slice(0,200)});}
                     },3000);
                 """.trimIndent()
-                val values = JSONObject().put("shenchanranToken","0123456789abcdef0123456789abcdef").put("doVideo",false)
+                val values = JSONObject().put("shenchanranToken",bankToken).put("doVideo",false)
                     .put("doDocument",false).put("doLive",false).put("doRenwu",false).put("doWork",true)
                     .put("doNoMission",true).put("autoSubmit",false).put("doAI",false)
                 client.call("script.start",JSONObject().put("handle",handle).put("source",monitor+"\n"+original)
@@ -158,6 +211,13 @@ class PluginEmbeddedBrowserDeviceTest {
                 assertTrue(client.call("script.control",JSONObject().put("handle",handle).put("action","start")).optBoolean("accepted"))
                 assertTrue("Question lookup not reached; see private diagnostic report",questionLookup.await(100,TimeUnit.SECONDS))
                 assertTrue("Question document was not observed",questionDocument.await(5,TimeUnit.SECONDS))
+                assertTrue("The iframe's page helper is hidden from the userscript",
+                    trace.any { it.optString("saveFunction") == "function" })
+                if(actualBank) Thread.sleep(if(queryLimit>1) 35_000 else 12_000)
+                if(actualBank) {
+                    assertTrue("No answer selection was observed",trace.any { it.optInt("selected")>0 || it.optBoolean("attemptedSave") })
+                    assertFalse("The original script reported a loop error",trace.any { it.optBoolean("unexpectedError") })
+                }
                 client.call("script.stop")
             }
         } finally {

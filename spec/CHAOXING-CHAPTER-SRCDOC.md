@@ -19,3 +19,16 @@
 `PluginEmbeddedBrowserDeviceTest.authorizedOriginalChapterScriptReadOnlyDiagnostic` 需要显式的 `allowChapterScriptRead=true` 和设备私有目录中的授权 Cookie、课程入口及原脚本文件。缺少任一条件时跳过；这些私有文件及原始采集数据不纳入仓库。公开回归 `PluginBrowserNavigationTest` 检查非脚本页面、其他协议、附加查询参数和其他 `about:` 页面仍被拒绝。
 
 当前修复安装于 MuMu 的开发预览包，尚未作为正式 App 更新发布。学习通插件继续仅交付本地包，不上架，不提交独立插件源码。
+
+## 完整资源与真实题库复测
+
+原先的静态资源限制掩盖了两个后续问题，不能将上述模拟查题结果视为完整验收：
+
+1. MuMu 的 ABI 为 x86_64，原先安装的预览包使用 ARM 库。放开章节页资源并加载校方 `enc_js_work.js` 后，Gecko 内容进程以 SIGSEGV 退出，页面的 BrowsingContext 不再有 currentWindowGlobal，任务界面却保持运行状态。相同场景使用 x86_64 原生预览包后能加载完整题页。临时远程调试配置已移除，调试端口转发已撤销。
+2. 真实答案能够填入页面，但原脚本通过 `iframe.contentWindow` 访问 `noSubmit` 等页面函数时，Xray 包装隐藏了这些函数，原脚本记录循环错误。现在 iframe 的 contentWindow 使用与 unsafeWindow 相同的窗口包装；原生 contentDocument、DOM 方法接收者、跨源访问规则保持原样。未修改原版 3.0.3 脚本。Gecko 扩展版本为 3.4.0.12，SDK 与 App 资源已从 host-api 同步。
+
+回归先在旧包确认“iframe 页面函数不可见”的设备测试失败，再确认新包通过；JS 回归 23 项通过。最终真实题库设备测试通过（55.283 秒）：两次真实查题均返回 HTTP 200、code 1 及非空答案，观察到选项被选中、脚本进入自动保存分支并继续下一章节，剩余任务从 87 变为 85，没有原先的循环错误。整个排查累计消耗 7 次额度，余额 824 → 817。
+
+隔离诊断只开启章节测验与非任务点测验，浏览器原生网络只允许 GET，宿主只转发明确列出的学校读取接口；真实保存、提交和学习进度写入均被拦截。因此上述结果覆盖读取、真实查题、页面填答和继续循环，不代表真实保存或自动提交已经验收。客户端剩余数量是脚本遍历进度，不代表学校已完成的任务数。
+
+MuMu 构建使用 `gradlew.bat :app:assembleUiPreview -PemulatorPreview=true`；对应设备测试增加 `-PuiTestBuildType=uiPreview`。该参数仅用于本地测试，正式 release 构建显式拒绝此参数。正式更新尚未发布，线上 SDK、门户和审核工具链仍须按协同发布规范完成同步后才能推广。

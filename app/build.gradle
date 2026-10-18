@@ -19,6 +19,8 @@ def code = versionProps['VERSION_CODE'].toInteger()
 def name = versionProps['VERSION_NAME']
 // Optional phone-only preview; regular builds retain their existing ABI coverage.
 def compactPreview = providers.gradleProperty('compactPreview').map { it.toBoolean() }.getOrElse(false)
+// MuMu is x86_64. Run Gecko natively during device checks rather than via ARM translation.
+def emulatorPreview = providers.gradleProperty('emulatorPreview').map { it.toBoolean() }.getOrElse(false)
 def localSecrets = new Properties()
 def localPropertiesFile = rootProject.file('local.properties')
 
@@ -51,6 +53,9 @@ def isReleaseTask = gradle.startParameter.taskNames.any { taskName ->
     def lower = taskName.toLowerCase()
     (lower.contains('release') && (lower.contains('assemble') || lower.contains('bundle')))
 }
+if (emulatorPreview && isReleaseTask) {
+    throw new GradleException('emulatorPreview is only for local device testing, not release builds')
+}
 
 println "📦 当前版本: versionCode=$code, versionName=$name (isRelease=$isReleaseTask)"
 
@@ -82,7 +87,9 @@ android {
         targetSdk 34
         versionCode code
         versionName name
-        if (!isReleaseTask) { ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' } }
+        if (!isReleaseTask) {
+            ndk { abiFilters.addAll(emulatorPreview ? ['x86_64'] : ['arm64-v8a', 'armeabi-v7a']) }
+        }
         buildConfigField "String", "FEEDBACK_SIGNING_SECRET", quoteForBuildConfig(feedbackSigningSecret)
         buildConfigField "String", "MAP_CONFIG_CLIENT_SECRET", quoteForBuildConfig(mapConfigClientSecret)
         buildConfigField "String", "AMAP_ANDROID_SDK_KEY", quoteForBuildConfig(isReleaseTask ? "" : (readSecret("AMAP_ANDROID_SDK_KEY") ?: ""))
@@ -131,7 +138,7 @@ android {
             signingConfig signingConfigs.debug
             buildConfigField "boolean", "UI_PREVIEW", "true"
             if (compactPreview) {
-                ndk { abiFilters 'arm64-v8a' }
+                ndk { abiFilters emulatorPreview ? 'x86_64' : 'arm64-v8a' }
                 minifyEnabled true
                 proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             }
@@ -153,7 +160,8 @@ android {
         // Android extracts the device's libraries when installing the APK.
         jniLibs.useLegacyPackaging = true
         // AGP's universal split also includes dependency ABIs outside splits.include.
-        jniLibs.excludes += ['**/x86/**', '**/x86_64/**']
+        jniLibs.excludes += ['**/x86/**']
+        if (!emulatorPreview) jniLibs.excludes += ['**/x86_64/**']
     }
     
     compileOptions {
